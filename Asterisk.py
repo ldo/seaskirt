@@ -4,6 +4,7 @@
 # Start of development 2007 March 2 by Lawrence D'Oliveiro
 #    <ldo@geek-central.gen.nz>.
 # Separated out from asterisk_test 2007 July 20.
+# Add GotMoreResponse 2008 April 14.
 #-
 
 import sys
@@ -15,10 +16,10 @@ class Manager :
 	NL = "\015\012" # protocol line delimiter
 
 	def GetResponse(self) :
-		NL = Manager.NL
+		"""reads and parses another response from the Asterisk Manager connection."""
 		Response = {}
 		while True :
-			Split = self.Buff.split(NL, 1)
+			Split = self.Buff.split(self.NL, 1)
 			if len(Split) == 2 :
 				self.Buff = Split[1]
 				if len(Split[0]) == 0 :
@@ -41,17 +42,22 @@ class Manager :
 		return Response
 	#end GetResponse
 
+	def GotMoreResponse(self) :
+		"""returns True iff there's another response from the Asterisk Manager
+		connection in the buffer waiting to be parsed and returned."""
+		return len(self.Buff.split(self.NL + self.NL, 1)) == 2
+	#end GotMoreResponse
+
 	def Transact(self, Action, Parms, MultiResponse = False) :
 		"""does a basic transaction and returns the single response
 		or sequence of responses, depending on MultiResponse.
 		MultiResponse can be a string specifying the Response
 		value that indicates the end of a response sequence."""
-		NL = Manager.NL
-		ToSend = "Action: " + Action + NL
+		ToSend = "Action: " + Action + self.NL
 		for Parm in Parms.keys() :
-			ToSend += Parm + ": " + str(Parms[Parm]) + NL
+			ToSend += Parm + ": " + str(Parms[Parm]) + self.NL
 		#end for
-		ToSend += NL # marks end of request
+		ToSend += self.NL # marks end of request
 		if self.Debug :
 			sys.stderr.write(ToSend)
 		#end if
@@ -111,17 +117,16 @@ class Manager :
 	def __init__(self, Host = "127.0.0.1", Port = 5038) :
 		"""opens connection and receives initial Hello message
 		from Asterisk."""
-		NL = Manager.NL
 		self.Debug = False
 		self.TheConn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 		self.TheConn.connect((Host, Port))
 		self.Buff = ""
 		while True : # get initial hello msg
 			self.Buff += self.TheConn.recv(256) # msg is small
-			if self.Buff.find(NL) >= 0 :
+			if self.Buff.find(self.NL) >= 0 :
 				break
 		#end while
-		(self.Hello, self.Buff) = self.Buff.split(NL, 1)
+		(self.Hello, self.Buff) = self.Buff.split(self.NL, 1)
 	#end __init__
 
 	def fileno(self) :

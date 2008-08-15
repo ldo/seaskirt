@@ -5,6 +5,7 @@
 #    <ldo@geek-central.gen.nz>.
 # Separated out from asterisk_test 2007 July 20.
 # Add GotMoreResponse 2008 April 14.
+# Add AutoMultiResponse 2008 August 15.
 #-
 
 import sys
@@ -14,6 +15,17 @@ class Manager :
 	"""simple management of an Asterisk Manager API connection."""
 
 	NL = "\015\012" # protocol line delimiter
+
+	AutoMultiResponse = \
+	  { # table of actions which are automatically recognized as being MultiResponse.
+		# Note keys are lowercase, while values are case-sensitive.
+		"agents" : "AgentsComplete",
+		"parkedcalls" : "ParkedCallsComplete",
+		"queuestatus" : "QueueStatusComplete",
+		"sippeers" : "PeerlistComplete",
+		"status" : "StatusComplete",
+		"zapshowchannels" : "ZapShowChannelsComplete",
+	  }
 
 	def GetResponse(self) :
 		"""reads and parses another response from the Asterisk Manager connection."""
@@ -65,6 +77,12 @@ class Manager :
 			Sent = self.TheConn.send(ToSend)
 			ToSend = ToSend[Sent:]
 		#end while
+		if MultiResponse == False :
+			MultiResponse = self.AutoMultiResponse.get(Action.lower())
+			if MultiResponse == None :
+				MultiResponse = False
+			#end if
+		#end if
 		if MultiResponse != None and MultiResponse != False :
 			Response = []
 			while True :

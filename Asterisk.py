@@ -6,6 +6,7 @@
 # Separated out from asterisk_test 2007 July 20.
 # Add GotMoreResponse 2008 April 14.
 # Add AutoMultiResponse 2008 August 15.
+# Split response line on only first colon 2008 August 22.
 #-
 
 import sys
@@ -36,7 +37,7 @@ class Manager :
 				self.Buff = Split[1]
 				if len(Split[0]) == 0 :
 					break
-				(Keyword, Value) = Split[0].split(": ")
+				(Keyword, Value) = Split[0].split(": ", 1)
 				Response[Keyword] = Value
 			else :
 				if self.Debug :
@@ -60,15 +61,20 @@ class Manager :
 		return len(self.Buff.split(self.NL + self.NL, 1)) == 2
 	#end GotMoreResponse
 
-	def Transact(self, Action, Parms, MultiResponse = False) :
+	def Transact(self, Action, Parms, Vars = None) :
 		"""does a basic transaction and returns the single response
-		or sequence of responses, depending on MultiResponse.
-		MultiResponse can be a string specifying the Response
-		value that indicates the end of a response sequence."""
+		or sequence of responses. Note this doesn't currently handle
+		commands like "IAXpeers" or "Queues" that don't return
+		response lines in the usual "keyword: value" format."""
 		ToSend = "Action: " + Action + self.NL
 		for Parm in Parms.keys() :
 			ToSend += Parm + ": " + str(Parms[Parm]) + self.NL
 		#end for
+		if Vars != None :
+			for Var in Vars.keys() :
+				ToSend += "Variable: " + str(Var) + "=" + str(Vars[Var]) + self.NL
+			#end for
+		#end if
 		ToSend += self.NL # marks end of request
 		if self.Debug :
 			sys.stderr.write(ToSend)
@@ -77,13 +83,8 @@ class Manager :
 			Sent = self.TheConn.send(ToSend)
 			ToSend = ToSend[Sent:]
 		#end while
-		if MultiResponse == False :
-			MultiResponse = self.AutoMultiResponse.get(Action.lower())
-			if MultiResponse == None :
-				MultiResponse = False
-			#end if
-		#end if
-		if MultiResponse != None and MultiResponse != False :
+		MultiResponse = self.AutoMultiResponse.get(Action.lower())
+		if MultiResponse != None :
 			Response = []
 			while True :
 				NextResponse = self.GetResponse()

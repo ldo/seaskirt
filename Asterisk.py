@@ -7,6 +7,7 @@
 # Add GotMoreResponse 2008 April 14.
 # Add AutoMultiResponse 2008 August 15.
 # Split response line on only first colon 2008 August 22.
+# Add GetQueueStatus 2008 August 22.
 #-
 
 import sys
@@ -132,6 +133,45 @@ class Manager :
 			raise RuntimeError("authentication failed")
 		#end if
 	#end Authenticate
+
+	def GetQueueStatus(self) :
+		"""does a QueueStatus request and returns the parsed response as a list
+		of entries, one per queue."""
+		Response = self.Transact("QueueStatus", {})
+		Result = {}
+		Responses = iter(Response)
+		LastQueue = None # to begin with
+		while True :
+			try :
+				ResponseItem = Responses.next()
+			except StopIteration :
+				ResponseItem = None
+			#end try
+			if ResponseItem != None :
+				Kind = ResponseItem.get("Event") # absent for first response item
+			else :
+				Kind = "QueueParams" # dummy to finish entry for last queue
+			#end if
+			if Kind == "QueueParams" :
+				if LastQueue != None :
+					LastQueue["members"] = LastQueueMembers
+					LastQueue["entries"] = LastQueueEntries
+					Result[LastQueueName] = LastQueue
+				#end if
+				if ResponseItem == None :
+					break
+				LastQueueName = ResponseItem["Queue"]
+				LastQueue = dict(ResponseItem)
+				LastQueueMembers = []
+				LastQueueEntries = []
+			elif Kind == "QueueMember" :
+				LastQueueMembers.append(dict(ResponseItem))
+			elif Kind == "QueueEntry" :
+				LastQueueEntries.append(dict(ResponseItem))
+			#end if
+		#end while
+		return Result
+	#end GetQueueStatus
 
 	def __init__(self, Host = "127.0.0.1", Port = 5038) :
 		"""opens connection and receives initial Hello message

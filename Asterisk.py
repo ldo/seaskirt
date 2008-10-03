@@ -9,6 +9,7 @@
 # Split response line on only first colon 2008 August 22.
 # Add GetQueueStatus 2008 August 22.
 # Separate out SendRequest 2008 October 3.
+# Add multiresponse error checking 2008 October 3.
 #-
 
 import sys
@@ -105,6 +106,7 @@ class Manager :
 		MultiResponse = self.AutoMultiResponse.get(Action.lower())
 		if MultiResponse != None :
 			Response = []
+			FirstResponse = True
 			while True :
 				NextResponse = self.GetResponse()
 				if self.EOF or len(NextResponse) == 0 :
@@ -115,13 +117,24 @@ class Manager :
 						"NextResponse: \"%s\"\n" % repr(NextResponse)
 					  )
 				#end if
-				Response.append(NextResponse)
-				if (
-						type(MultiResponse) == str
-					and
-						NextResponse.get("Event", None) == MultiResponse
-				) :
-					break
+				if FirstResponse :
+					# check for success/failure
+					if not NextResponse.get("Response", None) == "Success" :
+						raise RuntimeError \
+						  (
+							"%s failed -- %s" % (Action, NextResponse.get("Message", "?"))
+						  )
+					#end if
+					FirstResponse = False
+				else :
+					Response.append(NextResponse)
+					if (
+							type(MultiResponse) == str
+						and
+							NextResponse.get("Event", None) == MultiResponse
+					) :
+						break
+				#end if
 			#end while
 		else :
 			Response = self.GetResponse()

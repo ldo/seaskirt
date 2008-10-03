@@ -8,6 +8,7 @@
 # Add AutoMultiResponse 2008 August 15.
 # Split response line on only first colon 2008 August 22.
 # Add GetQueueStatus 2008 August 22.
+# Separate out SendRequest 2008 October 3.
 #-
 
 import sys
@@ -29,6 +30,34 @@ class Manager :
 		"zapshowchannels" : "ZapShowChannelsComplete",
 	  }
 
+	@classmethod
+	def Sanitize(self, Parm) :
+		# sanitizes the value of Parm to avoid misbehaviour with Manager API syntax.
+		return str(Parm).replace("\n", "")
+	#end Sanitize
+
+	def SendRequest(self, Action, Parms, Vars = None) :
+		"""sends a request to the Manager."""
+		ToSend = "Action: " + Action + self.NL
+		for Parm in Parms.keys() :
+			ToSend += Parm + ": " + self.Sanitize(Parms[Parm]) + self.NL
+		#end for
+		if Vars != None :
+			for Var in Vars.keys() :
+				ToSend += \
+					"Variable: " + self.Sanitize(Var) + "=" + self.Sanitize(Vars[Var]) + self.NL
+			#end for
+		#end if
+		ToSend += self.NL # marks end of request
+		if self.Debug :
+			sys.stderr.write(ToSend)
+		#end if
+		while len(ToSend) != 0 :
+			Sent = self.TheConn.send(ToSend)
+			ToSend = ToSend[Sent:]
+		#end while
+	#end SendRequest
+
 	def GetResponse(self) :
 		"""reads and parses another response from the Asterisk Manager connection."""
 		Response = {}
@@ -44,7 +73,12 @@ class Manager :
 				if self.Debug :
 					sys.stderr.write("Getting more\n")
 				#end if
-				self.Buff += self.TheConn.recv(4096)
+				More = self.TheConn.recv(4096)
+				if len(More) == 0 :
+					self.EOF = True
+					break
+				#end if
+				self.Buff += More
 				if self.Debug :
 					sys.stderr.write \
 					  (
@@ -67,29 +101,13 @@ class Manager :
 		or sequence of responses. Note this doesn't currently handle
 		commands like "IAXpeers" or "Queues" that don't return
 		response lines in the usual "keyword: value" format."""
-		ToSend = "Action: " + Action + self.NL
-		for Parm in Parms.keys() :
-			ToSend += Parm + ": " + str(Parms[Parm]) + self.NL
-		#end for
-		if Vars != None :
-			for Var in Vars.keys() :
-				ToSend += "Variable: " + str(Var) + "=" + str(Vars[Var]) + self.NL
-			#end for
-		#end if
-		ToSend += self.NL # marks end of request
-		if self.Debug :
-			sys.stderr.write(ToSend)
-		#end if
-		while len(ToSend) != 0 :
-			Sent = self.TheConn.send(ToSend)
-			ToSend = ToSend[Sent:]
-		#end while
+		self.SendRequest(Action, Parms, Vars)
 		MultiResponse = self.AutoMultiResponse.get(Action.lower())
 		if MultiResponse != None :
 			Response = []
 			while True :
 				NextResponse = self.GetResponse()
-				if len(NextResponse) == 0 :
+				if self.EOF or len(NextResponse) == 0 :
 					break
 				if self.Debug :
 					sys.stderr.write \
@@ -98,11 +116,11 @@ class Manager :
 					  )
 				#end if
 				Response.append(NextResponse)
-				if \
-						type(MultiResponse) == str \
-					and \
-						NextResponse.get("Event", None) == MultiResponse \
-				:
+				if (
+						type(MultiResponse) == str
+					and
+						NextResponse.get("Event", None) == MultiResponse
+				) :
 					break
 			#end while
 		else :
@@ -176,12 +194,18 @@ class Manager :
 	def __init__(self, Host = "127.0.0.1", Port = 5038) :
 		"""opens connection and receives initial Hello message
 		from Asterisk."""
-		self.Debug = False
+		self.Debug = False # can be set to True by caller
 		self.TheConn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 		self.TheConn.connect((Host, Port))
 		self.Buff = ""
+		self.EOF = False
 		while True : # get initial hello msg
-			self.Buff += self.TheConn.recv(256) # msg is small
+			More = self.TheConn.recv(256) # msg is small
+			if len(More) == 0 :
+				self.EOF = True
+				break
+			#end if
+			self.Buff += More
 			if self.Buff.find(self.NL) >= 0 :
 				break
 		#end while

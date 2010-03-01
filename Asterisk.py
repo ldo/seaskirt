@@ -1,15 +1,7 @@
 #+
 # Various useful Asterisk-related definitions.
 #
-# Start of development 2007 March 2 by Lawrence D'Oliveiro
-#    <ldo@geek-central.gen.nz>.
-# Separated out from asterisk_test 2007 July 20.
-# Add GotMoreResponse 2008 April 14.
-# Add AutoMultiResponse 2008 August 15.
-# Split response line on only first colon 2008 August 22.
-# Add GetQueueStatus 2008 August 22.
-# Separate out SendRequest 2008 October 3.
-# Add multiresponse error checking 2008 October 3.
+# Created by Lawrence D'Oliveiro <ldo@geek-central.gen.nz>.
 #-
 
 import sys
@@ -165,6 +157,67 @@ class Manager :
 		#end if
 	#end Authenticate
 
+	def DoCommand(self, Command) :
+		"""does a Command request and returns the response text."""
+		self.SendRequest("Command", {"Command" : Command})
+		Response = ""
+		FirstResponse = True
+		Status = None
+		while True :
+			while True :
+				if self.Buff.find(self.NL) >= 0 or self.EOF :
+					break
+				if self.Debug :
+					sys.stderr.write("Getting more\n")
+				#end if
+				More = self.TheConn.recv(4096)
+				if len(More) == 0 :
+					self.EOF = True
+					break
+				#end if
+				self.Buff += More
+				if self.Debug :
+					sys.stderr.write \
+					  (
+						"Got (%u): \"%s\"\n" % (len(self.Buff), self.Buff)
+					  )
+				#end if
+			#end while
+			if self.Buff.find(self.NL) < 0 :
+				break
+			if FirstResponse :
+				Line, self.Buff = self.Buff.split(self.NL, 1)
+				Items = Line.split(": ", 1)
+				if len(Items) == 2 :
+					if Items[0] == "Response" :
+						Status = Items[1]
+						if Status != "Follows" :
+							raise RuntimeError \
+							  (
+								"Command failed -- %s" % (Status,)
+							  )
+						#end if
+					#end if
+				else :
+					FirstResponse = False
+					self.Buff = Line + self.NL + self.Buff
+					if Status == None :
+						raise RuntimeError("No Response received for Command")
+					#end if
+				#end if
+			#end if
+			if not FirstResponse :
+				Items = self.Buff.split("--END COMMAND--" + self.NL + self.NL, 1)
+				if len(Items) == 2 :
+					Response = Items[0]
+					self.Buff = Items[1]
+					break
+				#end if
+			#end if
+		#end while
+		return Response
+	#end DoCommand
+
 	def GetQueueStatus(self) :
 		"""does a QueueStatus request and returns the parsed response as a list
 		of entries, one per queue."""
@@ -203,6 +256,33 @@ class Manager :
 		#end while
 		return Result
 	#end GetQueueStatus
+
+	def GetChannels(self) :
+		"""gets information on all currently-existing channels."""
+		Result = []
+		Fields = \
+			(
+				"channel",
+				"context",
+				"exten",
+				"prio",
+				"state",
+				"appl",
+				"data",
+				"cid",
+				"accountcode",
+				"amaflags",
+				"duration",
+				"bridged_context",
+			  )
+		for Line in self.DoCommand("core show channels concise").split("\012") :
+			Line = Line.split("!")
+			if len(Line) >= len(Fields) :
+				Result.append(dict(zip(Fields, Line)))
+			#end if
+		#end for
+		return Result
+	#end GetChannels
 
 	def __init__(self, Host = "127.0.0.1", Port = 5038) :
 		"""opens connection and receives initial Hello message

@@ -331,6 +331,7 @@ class AGI :
         was invoked via the EAGI application command).
         agi_vars attribute will be set to a dictionary containing all the initial
         AGI variable definitions passed from Asterisk."""
+        self.Debug = False # can be set to True by caller
         if from_asterisk == None :
             from_asterisk = sys.stdin
         #end if
@@ -360,16 +361,18 @@ class AGI :
 
     def request(self, req) :
         """send a generic request line and return a 3-tuple of (code, text, rest) on success."""
-        sys.stderr.write("sending request: %s\n" % repr(req)) # debug
-        sys.stderr.flush() # debug
+        if self.Debug  :
+            sys.stderr.write("sending request: %s\n" % repr(req))
+        #end if
         self.to_asterisk.write(req + "\n")
         self.to_asterisk.flush()
         line = self.from_asterisk.readline().rstrip("\n")
-        sys.stderr.write("first response line: %s\n" % repr(line)) # debug
+        if self.Debug :
+            sys.stderr.write("first response line: %s\n" % repr(line))
+        #end if
         if not line.startswith("200") :
             raise RuntimeError("Asterisk AGI error: %s" % line)
         #end if
-        sys.stderr.flush() # debug
         continued = line[3] == "-"
         line = line[4:]
         if not line.startswith("result=") :
@@ -388,6 +391,7 @@ class AGI :
         #end if
         rest = None
         if continued :
+            # not sure if this is correct yet
             while True :
                 line = self.from_asterisk.readline()
                 if rest == None :

@@ -406,6 +406,9 @@ class AGI :
         return (int(code), text, rest)
     #end request
 
+    # specific functions, built on top of request
+    # could implement more of those listed here <http://www.voip-info.org/wiki/view/Asterisk+AGI>
+
     def get_variable(self, varname) :
         """returns the value of the specified Asterisk global, or None if not defined."""
         return \

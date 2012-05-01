@@ -5,6 +5,7 @@
 #-
 
 import sys
+import os
 import socket
 
 class Manager :
@@ -317,3 +318,94 @@ class Manager :
     #end close
 
 #end Manager
+
+class AGI :
+    """for use by a script invoked via the AGI, DeadAGI or EAGI dialplan commands."""
+
+    def __init__(self, from_asterisk = None, to_asterisk = None, args = None, EAGI = False) :
+        """from_asterisk and to_asterisk are file objects to use to communicate
+        with Asterisk; default to sys.stdin and sys.stdout if not specified, while
+        args are taken from sys.argv if not specified.
+        EAGI indicates whether to set audio_in attribute to a file object for
+        reading linear PCM audio from the channel (only possible if the script
+        was invoked via the EAGI application command).
+        agi_vars attribute will be set to a dictionary containing all the initial
+        AGI variable definitions passed from Asterisk."""
+        if from_asterisk == None :
+            from_asterisk = sys.stdin
+        #end if
+        if to_asterisk == None :
+            to_asterisk = sys.stdout
+        #end if
+        if args != None :
+            self.args = args
+        else :
+            self.args = sys.argv
+        #end if
+        self.from_asterisk = from_asterisk
+        self.to_asterisk = to_asterisk
+        self.audio_in = None
+        if EAGI :
+            self.audio_in = os.fdopen(3, "r")
+        #end if
+        self.agi_vars = {}
+        while True :
+            line = self.from_asterisk.readline().rstrip("\n")
+            if len(line) == 0 :
+                break
+            name, value = line.split(": ", 1)
+            self.agi_vars[name] = value
+        #end while
+    #end __init__
+
+    def request(self, req) :
+        """send a generic request line and return a 3-tuple of (code, text, rest) on success."""
+        sys.stderr.write("sending request: %s\n" % repr(req)) # debug
+        sys.stderr.flush() # debug
+        self.to_asterisk.write(req + "\n")
+        self.to_asterisk.flush()
+        line = self.from_asterisk.readline().rstrip("\n")
+        sys.stderr.write("first response line: %s\n" % repr(line)) # debug
+        if not line.startswith("200") :
+            raise RuntimeError("Asterisk AGI error: %s" % line)
+        #end if
+        sys.stderr.flush() # debug
+        continued = line[3] == "-"
+        line = line[4:]
+        if not line.startswith("result=") :
+            raise RuntimeError("Asterisk AGI returned unexpected result: %s" % line)
+        #end if
+        line = line[7:]
+        line = line.split(" ", 1)
+        if len(line) > 1 :
+            code, text = line
+            if text.startswith("(") and text.endswith(")") :
+                text = text[1:-1]
+            #end if
+        else :
+            code = line[0]
+            text = None
+        #end if
+        rest = None
+        if continued :
+            while True :
+                line = self.from_asterisk.readline()
+                if rest == None :
+                    rest = line
+                else :
+                    rest += line
+                #end if
+                if line.startswith(code) :
+                    break
+            #end while
+        #end if
+        return (int(code), text, rest)
+    #end request
+
+    def get_variable(self, varname) :
+        """returns the value of the specified Asterisk global, or None if not defined."""
+        return \
+            self.request("GET VARIABLE %s" % varname)[1]
+    #end get_variable
+
+#end AGI

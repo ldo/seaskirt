@@ -285,11 +285,14 @@ class Manager :
         return Result
     #end GetChannels
 
-    def __init__(self, Host = "127.0.0.1", Port = 5038) :
+    def __init__(self, Host = "127.0.0.1", Port = 5038, Timeout = None) :
         """opens connection and receives initial Hello message
         from Asterisk."""
         self.Debug = False # can be set to True by caller
         self.TheConn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        if Timeout != None :
+            self.TheConn.settimeout(Timeout)
+        #end if
         self.TheConn.connect((Host, Port))
         self.Buff = ""
         self.EOF = False

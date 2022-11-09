@@ -30,7 +30,7 @@ class Manager :
         return str(parm).replace("\n", "")
     #end sanitize
 
-    def SendRequest(self, action, parms, vars = None) :
+    def send_request(self, action, parms, vars = None) :
         "sends a request to the Manager."
         to_send = "Action: " + action + self.NL
         for parm in parms.keys() :
@@ -51,9 +51,9 @@ class Manager :
             sent = self.the_conn.send(to_send)
             to_send = to_send[sent:]
         #end while
-    #end SendRequest
+    #end send_request
 
-    def GetResponse(self) :
+    def get_response(self) :
         "reads and parses another response from the Asterisk Manager connection."
         response = {}
         while True :
@@ -83,26 +83,26 @@ class Manager :
             #end if
         #end while
         return response
-    #end GetResponse
+    #end get_response
 
-    def GotMoreResponse(self) :
+    def got_more_response(self) :
         "returns True iff there’s another response from the Asterisk Manager" \
         " connection in the buffer waiting to be parsed and returned."
         return len(self.buff.split(self.NL + self.NL, 1)) == 2
-    #end GotMoreResponse
+    #end got_more_response
 
-    def Transact(self, action, parms, vars = None) :
+    def transact(self, action, parms, vars = None) :
         "does a basic transaction and returns the single response" \
         " or sequence of responses. Note this doesn’t currently handle" \
         " commands like “IAXpeers” or “Queues” that don’t return" \
         " response lines in the usual “keyword: value” format."
-        self.SendRequest(action, parms, vars)
+        self.send_request(action, parms, vars)
         multi_response = self.auto_multi_response.get(action.lower())
         if multi_response != None :
             response = []
             first_response = True
             while True :
-                next_response = self.GetResponse()
+                next_response = self.get_response()
                 if self.EOF or len(next_response) == 0 :
                     break
                 if self.debug :
@@ -131,12 +131,12 @@ class Manager :
                 #end if
             #end while
         else :
-            response = self.GetResponse()
+            response = self.get_response()
         #end if
         return response
-    #end Transact
+    #end transact
 
-    def Authenticate(self, username, password, want_events = False) :
+    def authenticate(self, username, password, want_events = False) :
         "logs in with a username and password. This is mandatory" \
         " after opening the connection, before trying any other" \
         " commands. want_events indicates whether you want to receive" \
@@ -149,7 +149,7 @@ class Manager :
         if not want_events :
             parms["Events"] = "off"
         #end if
-        response = self.Transact \
+        response = self.transact \
           (
             action = "Login",
             parms = parms
@@ -157,11 +157,11 @@ class Manager :
         if response["Response"] != "Success" :
             raise RuntimeError("authentication failed")
         #end if
-    #end Authenticate
+    #end authenticate
 
-    def DoCommand(self, command) :
+    def do_command(self, command) :
         "does a Command request and returns the response text."
-        self.SendRequest("Command", {"Command" : command})
+        self.send_request("Command", {"Command" : command})
         response = ""
         first_response = True
         status = None
@@ -223,12 +223,12 @@ class Manager :
             #end if
         #end while
         return response
-    #end DoCommand
+    #end do_command
 
-    def GetQueueStatus(self) :
+    def get_queue_status(self) :
         "does a QueueStatus request and returns the parsed response as a list" \
         " of entries, one per queue."
-        response = self.Transact("QueueStatus", {})
+        response = self.transact("QueueStatus", {})
         result = {}
         responses = iter(response)
         last_queue = None # to begin with
@@ -258,9 +258,9 @@ class Manager :
             #end if
         #end while
         return result
-    #end GetQueueStatus
+    #end get_queue_status
 
-    def GetChannels(self) :
+    def get_channels(self) :
         "gets information on all currently-existing channels."
         result = []
         fields = \
@@ -278,14 +278,14 @@ class Manager :
                 "duration",
                 "bridged_context",
               )
-        for line in self.DoCommand("core show channels concise").split("\012") :
+        for line in self.do_command("core show channels concise").split("\012") :
             line = line.split("!")
             if len(line) >= len(fields) :
                 result.append(dict(zip(fields, line)))
             #end if
         #end for
         return result
-    #end GetChannels
+    #end get_channels
 
     def __init__(self, host = "127.0.0.1", port = 5038, timeout = None) :
         "opens connection and receives initial Hello message" \

@@ -17,11 +17,11 @@ class Manager :
       { # table of actions which are automatically recognized as being MultiResponse.
         # Note keys are lowercase, while values are case-sensitive.
         "agents" : "AgentsComplete",
-        "parkedcalls" : "ParkedCallsComplete",
+        #"parkedcalls" : "ParkedCallsComplete", # not sure if this is right
         "queuestatus" : "QueueStatusComplete",
         "sippeers" : "PeerlistComplete",
         "status" : "StatusComplete",
-        "zapshowchannels" : "ZapShowChannelsComplete",
+        "coreshowchannels" : "CoreShowChannelsComplete",
       }
 
     @classmethod

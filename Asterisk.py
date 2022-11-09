@@ -46,6 +46,7 @@ class Manager :
         if self.Debug :
             sys.stderr.write(ToSend)
         #end if
+        ToSend = ToSend.encode()
         while len(ToSend) != 0 :
             Sent = self.TheConn.send(ToSend)
             ToSend = ToSend[Sent:]
@@ -72,7 +73,7 @@ class Manager :
                     self.EOF = True
                     break
                 #end if
-                self.Buff += More
+                self.Buff += More.decode()
                 if self.Debug :
                     sys.stderr.write \
                       (
@@ -177,7 +178,7 @@ class Manager :
                     self.EOF = True
                     break
                 #end if
-                self.Buff += More
+                self.Buff += More.decode()
                 if self.Debug :
                     sys.stderr.write \
                       (
@@ -307,7 +308,7 @@ class Manager :
                 self.EOF = True
                 break
             #end if
-            self.Buff += More
+            self.Buff += More.decode()
             if self.Buff.find(self.NL) >= 0 :
                 break
         #end while

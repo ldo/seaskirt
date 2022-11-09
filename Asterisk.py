@@ -173,6 +173,7 @@ class Manager :
                 #end if
                 More = self.TheConn.recv(4096)
                 if len(More) == 0 :
+                    print("EOF hit with Buff = %s" % repr(self.Buff)) # debug
                     self.EOF = True
                     break
                 #end if
@@ -184,6 +185,9 @@ class Manager :
                       )
                 #end if
             #end while
+            if self.Buff.startswith(self.NL) :
+                # newer Asterisk terminates multiple responses with blank line
+                break
             if self.Buff.find(self.NL) < 0 :
                 break
             if FirstResponse :
@@ -192,7 +196,7 @@ class Manager :
                 if len(Items) == 2 :
                     if Items[0] == "Response" :
                         Status = Items[1]
-                        if Status != "Follows" :
+                        if Status not in ("Follows", "Success") :
                             raise RuntimeError \
                               (
                                 "Command failed -- %s" % (Status,)
@@ -209,6 +213,7 @@ class Manager :
             #end if
             if not FirstResponse :
                 Items = self.Buff.split("--END COMMAND--" + self.NL + self.NL, 1)
+                # Note this doesn't happen with newer Asterisk any more
                 if len(Items) == 2 :
                     Response = Items[0]
                     self.Buff = Items[1]

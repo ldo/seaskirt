@@ -13,8 +13,8 @@ class Manager :
 
     NL = "\015\012" # protocol line delimiter
 
-    AutoMultiResponse = \
-      { # table of actions which are automatically recognized as being MultiResponse.
+    auto_multi_response = \
+      { # table of actions which are automatically recognized as being multi_response.
         # Note keys are lowercase, while values are case-sensitive.
         "agents" : "AgentsComplete",
         #"parkedcalls" : "ParkedCallsComplete", # not sure if this is right
@@ -25,249 +25,245 @@ class Manager :
       }
 
     @classmethod
-    def Sanitize(self, Parm) :
-        # sanitizes the value of Parm to avoid misbehaviour with Manager API syntax.
-        return str(Parm).replace("\n", "")
-    #end Sanitize
+    def sanitize(celf, parm) :
+        # sanitizes the value of parm to avoid misbehaviour with Manager API syntax.
+        return str(parm).replace("\n", "")
+    #end sanitize
 
-    def SendRequest(self, Action, Parms, Vars = None) :
+    def SendRequest(self, action, parms, vars = None) :
         "sends a request to the Manager."
-        ToSend = "Action: " + Action + self.NL
-        for Parm in Parms.keys() :
-            ToSend += Parm + ": " + self.Sanitize(Parms[Parm]) + self.NL
+        to_send = "Action: " + action + self.NL
+        for parm in parms.keys() :
+            to_send += parm + ": " + self.sanitize(parms[parm]) + self.NL
         #end for
-        if Vars != None :
-            for Var in Vars.keys() :
-                ToSend += \
-                    "Variable: " + self.Sanitize(Var) + "=" + self.Sanitize(Vars[Var]) + self.NL
+        if vars != None :
+            for var in vars.keys() :
+                to_send += \
+                    "Variable: " + self.sanitize(var) + "=" + self.sanitize(vars[var]) + self.NL
             #end for
         #end if
-        ToSend += self.NL # marks end of request
-        if self.Debug :
-            sys.stderr.write(ToSend)
+        to_send += self.NL # marks end of request
+        if self.debug :
+            sys.stderr.write(to_send)
         #end if
-        ToSend = ToSend.encode()
-        while len(ToSend) != 0 :
-            Sent = self.TheConn.send(ToSend)
-            ToSend = ToSend[Sent:]
+        to_send = to_send.encode()
+        while len(to_send) != 0 :
+            sent = self.the_conn.send(to_send)
+            to_send = to_send[sent:]
         #end while
     #end SendRequest
 
     def GetResponse(self) :
         "reads and parses another response from the Asterisk Manager connection."
-        Response = {}
+        response = {}
         while True :
-            Split = self.Buff.split(self.NL, 1)
-            if len(Split) == 2 :
-                self.Buff = Split[1]
-                if len(Split[0]) == 0 :
+            split = self.buff.split(self.NL, 1)
+            if len(split) == 2 :
+                self.buff = split[1]
+                if len(split[0]) == 0 :
                     break
-                (Keyword, Value) = Split[0].split(": ", 1)
-                Response[Keyword] = Value
+                (keyword, value) = split[0].split(": ", 1)
+                response[keyword] = value
             else :
-                if self.Debug :
+                if self.debug :
                     sys.stderr.write("Getting more\n")
                 #end if
-                More = self.TheConn.recv(4096)
-                if len(More) == 0 :
+                more = self.the_conn.recv(4096)
+                if len(more) == 0 :
                     self.EOF = True
                     break
                 #end if
-                self.Buff += More.decode()
-                if self.Debug :
+                self.buff += more.decode()
+                if self.debug :
                     sys.stderr.write \
                       (
-                        "Got (%u): \"%s\"\n" % (len(self.Buff), self.Buff)
+                        "Got (%u): \"%s\"\n" % (len(self.buff), self.buff)
                       )
                 #end if
             #end if
         #end while
-        return Response
+        return response
     #end GetResponse
 
     def GotMoreResponse(self) :
         "returns True iff there’s another response from the Asterisk Manager" \
         " connection in the buffer waiting to be parsed and returned."
-        return len(self.Buff.split(self.NL + self.NL, 1)) == 2
+        return len(self.buff.split(self.NL + self.NL, 1)) == 2
     #end GotMoreResponse
 
-    def Transact(self, Action, Parms, Vars = None) :
+    def Transact(self, action, parms, vars = None) :
         "does a basic transaction and returns the single response" \
         " or sequence of responses. Note this doesn’t currently handle" \
         " commands like “IAXpeers” or “Queues” that don’t return" \
         " response lines in the usual “keyword: value” format."
-        self.SendRequest(Action, Parms, Vars)
-        MultiResponse = self.AutoMultiResponse.get(Action.lower())
-        if MultiResponse != None :
-            Response = []
-            FirstResponse = True
+        self.SendRequest(action, parms, vars)
+        multi_response = self.auto_multi_response.get(action.lower())
+        if multi_response != None :
+            response = []
+            first_response = True
             while True :
-                NextResponse = self.GetResponse()
-                if self.EOF or len(NextResponse) == 0 :
+                next_response = self.GetResponse()
+                if self.EOF or len(next_response) == 0 :
                     break
-                if self.Debug :
+                if self.debug :
                     sys.stderr.write \
                       (
-                        "NextResponse: \"%s\"\n" % repr(NextResponse)
+                        "next_response: \"%s\"\n" % repr(next_response)
                       )
                 #end if
-                if FirstResponse :
+                if first_response :
                     # check for success/failure
-                    if not NextResponse.get("Response", None) == "Success" :
+                    if not next_response.get("Response", None) == "Success" :
                         raise RuntimeError \
                           (
-                            "%s failed -- %s" % (Action, NextResponse.get("Message", "?"))
+                            "%s failed -- %s" % (action, next_response.get("Message", "?"))
                           )
                     #end if
-                    FirstResponse = False
+                    first_response = False
                 else :
-                    Response.append(NextResponse)
+                    response.append(next_response)
                     if (
-                            type(MultiResponse) == str
+                            type(multi_response) == str
                         and
-                            NextResponse.get("Event", None) == MultiResponse
+                            next_response.get("Event", None) == multi_response
                     ) :
                         break
                 #end if
             #end while
         else :
-            Response = self.GetResponse()
+            response = self.GetResponse()
         #end if
-        return Response
+        return response
     #end Transact
 
-    def Authenticate(self, Username, Password, WantEvents = False) :
+    def Authenticate(self, username, password, want_events = False) :
         "logs in with a username and password. This is mandatory" \
         " after opening the connection, before trying any other" \
         " commands. want_events indicates whether you want to receive" \
         " unsolicited event notifications on this connection."
-        Parms = \
+        parms = \
             {
-                "Username" : Username,
-                "Secret" : Password,
+                "Username" : username,
+                "Secret" : password,
             }
-        if not WantEvents :
-            Parms["Events"] = "off"
+        if not want_events :
+            parms["Events"] = "off"
         #end if
-        Response = self.Transact \
+        response = self.Transact \
           (
-            Action = "Login",
-            Parms = Parms
+            action = "Login",
+            parms = parms
           )
-        if Response["Response"] != "Success" :
+        if response["Response"] != "Success" :
             raise RuntimeError("authentication failed")
         #end if
     #end Authenticate
 
-    def DoCommand(self, Command) :
+    def DoCommand(self, command) :
         "does a Command request and returns the response text."
-        self.SendRequest("Command", {"Command" : Command})
-        Response = ""
-        FirstResponse = True
-        Status = None
+        self.SendRequest("Command", {"Command" : command})
+        response = ""
+        first_response = True
+        status = None
         while True :
             while True :
-                if self.Buff.find(self.NL) >= 0 or self.EOF :
+                if self.buff.find(self.NL) >= 0 or self.EOF :
                     break
-                if self.Debug :
+                if self.debug :
                     sys.stderr.write("Getting more\n")
                 #end if
-                More = self.TheConn.recv(4096)
-                if len(More) == 0 :
-                    print("EOF hit with Buff = %s" % repr(self.Buff)) # debug
+                more = self.the_conn.recv(4096)
+                if len(more) == 0 :
+                    print("EOF hit with buff = %s" % repr(self.buff)) # debug
                     self.EOF = True
                     break
                 #end if
-                self.Buff += More.decode()
-                if self.Debug :
+                self.buff += more.decode()
+                if self.debug :
                     sys.stderr.write \
                       (
-                        "Got (%u): \"%s\"\n" % (len(self.Buff), self.Buff)
+                        "Got (%u): \"%s\"\n" % (len(self.buff), self.buff)
                       )
                 #end if
             #end while
-            if self.Buff.startswith(self.NL) :
+            if self.buff.startswith(self.NL) :
                 # newer Asterisk terminates multiple responses with blank line
                 break
-            if self.Buff.find(self.NL) < 0 :
+            if self.buff.find(self.NL) < 0 :
                 break
-            if FirstResponse :
-                Line, self.Buff = self.Buff.split(self.NL, 1)
-                Items = Line.split(": ", 1)
-                if len(Items) == 2 :
-                    if Items[0] == "Response" :
-                        Status = Items[1]
-                        if Status not in ("Follows", "Success") :
+            if first_response :
+                line, self.buff = self.buff.split(self.NL, 1)
+                items = line.split(": ", 1)
+                if len(items) == 2 :
+                    if items[0] == "Response" :
+                        status = items[1]
+                        if status not in ("Follows", "Success") :
                             raise RuntimeError \
                               (
-                                "Command failed -- %s" % (Status,)
+                                "Command failed -- %s" % (status,)
                               )
                         #end if
                     #end if
                 else :
-                    FirstResponse = False
-                    self.Buff = Line + self.NL + self.Buff
-                    if Status == None :
+                    first_response = False
+                    self.buff = line + self.NL + self.buff
+                    if status == None :
                         raise RuntimeError("No Response received for Command")
                     #end if
                 #end if
             #end if
-            if not FirstResponse :
-                Items = self.Buff.split("--END COMMAND--" + self.NL + self.NL, 1)
-                # Note this doesn't happen with newer Asterisk any more
-                if len(Items) == 2 :
-                    Response = Items[0]
-                    self.Buff = Items[1]
+            if not first_response :
+                items = self.buff.split("--END COMMAND--" + self.NL + self.NL, 1)
+                # Note this doesn’t happen with newer Asterisk any more
+                if len(items) == 2 :
+                    response = items[0]
+                    self.buff = items[1]
                     break
                 #end if
             #end if
         #end while
-        return Response
+        return response
     #end DoCommand
 
     def GetQueueStatus(self) :
         "does a QueueStatus request and returns the parsed response as a list" \
         " of entries, one per queue."
-        Response = self.Transact("QueueStatus", {})
-        Result = {}
-        Responses = iter(Response)
-        LastQueue = None # to begin with
+        response = self.Transact("QueueStatus", {})
+        result = {}
+        responses = iter(response)
+        last_queue = None # to begin with
         while True :
-            try :
-                ResponseItem = Responses.next()
-            except StopIteration :
-                ResponseItem = None
-            #end try
-            if ResponseItem != None :
-                Kind = ResponseItem.get("Event") # absent for first response item
+            response_item = next(responses, None)
+            if response_item != None :
+                kind = response_item.get("Event") # absent for first response item
             else :
-                Kind = "QueueParams" # dummy to finish entry for last queue
+                kind = "QueueParams" # dummy to finish entry for last queue
             #end if
-            if Kind == "QueueParams" :
-                if LastQueue != None :
-                    LastQueue["members"] = LastQueueMembers
-                    LastQueue["entries"] = LastQueueEntries
-                    Result[LastQueueName] = LastQueue
+            if kind == "QueueParams" :
+                if last_queue != None :
+                    last_queue["members"] = last_queue_members
+                    last_queue["entries"] = last_queue_entries
+                    result[last_queue_name] = last_queue
                 #end if
-                if ResponseItem == None :
+                if response_item == None :
                     break
-                LastQueueName = ResponseItem["Queue"]
-                LastQueue = dict(ResponseItem)
-                LastQueueMembers = []
-                LastQueueEntries = []
-            elif Kind == "QueueMember" :
-                LastQueueMembers.append(dict(ResponseItem))
-            elif Kind == "QueueEntry" :
-                LastQueueEntries.append(dict(ResponseItem))
+                last_queue_name = response_item["Queue"]
+                last_queue = dict(response_item)
+                last_queue_members = []
+                last_queue_entries = []
+            elif kind == "QueueMember" :
+                last_queue_members.append(dict(response_item))
+            elif kind == "QueueEntry" :
+                last_queue_entries.append(dict(response_item))
             #end if
         #end while
-        return Result
+        return result
     #end GetQueueStatus
 
     def GetChannels(self) :
         "gets information on all currently-existing channels."
-        Result = []
-        Fields = \
+        result = []
+        fields = \
             (
                 "channel",
                 "context",
@@ -282,48 +278,48 @@ class Manager :
                 "duration",
                 "bridged_context",
               )
-        for Line in self.DoCommand("core show channels concise").split("\012") :
-            Line = Line.split("!")
-            if len(Line) >= len(Fields) :
-                Result.append(dict(zip(Fields, Line)))
+        for line in self.DoCommand("core show channels concise").split("\012") :
+            line = line.split("!")
+            if len(line) >= len(fields) :
+                result.append(dict(zip(fields, line)))
             #end if
         #end for
-        return Result
+        return result
     #end GetChannels
 
-    def __init__(self, Host = "127.0.0.1", Port = 5038, Timeout = None) :
+    def __init__(self, host = "127.0.0.1", port = 5038, timeout = None) :
         "opens connection and receives initial Hello message" \
         " from Asterisk."
-        self.Debug = False # can be set to True by caller
-        self.TheConn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        if Timeout != None :
-            self.TheConn.settimeout(Timeout)
+        self.debug = False # can be set to True by caller
+        self.the_conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        if timeout != None :
+            self.the_conn.settimeout(timeout)
         #end if
-        self.TheConn.connect((Host, Port))
-        self.Buff = ""
+        self.the_conn.connect((host, port))
+        self.buff = ""
         self.EOF = False
         while True : # get initial hello msg
-            More = self.TheConn.recv(256) # msg is small
-            if len(More) == 0 :
+            more = self.the_conn.recv(256) # msg is small
+            if len(more) == 0 :
                 self.EOF = True
                 break
             #end if
-            self.Buff += More.decode()
-            if self.Buff.find(self.NL) >= 0 :
+            self.buff += more.decode()
+            if self.buff.find(self.NL) >= 0 :
                 break
         #end while
-        (self.Hello, self.Buff) = self.Buff.split(self.NL, 1)
+        (self.hello, self.buff) = self.buff.split(self.NL, 1)
     #end __init__
 
     def fileno(self) :
         "allows use in a select, for example to check if" \
         " any unsolicited events are available to be read."
-        return self.TheConn.fileno()
+        return self.the_conn.fileno()
     #end fileno
 
     def close(self) :
         "closes the Asterisk Manager connection."
-        self.TheConn.close()
+        self.the_conn.close()
     #end close
 
 #end Manager
@@ -340,7 +336,7 @@ class AGI :
         " was invoked via the EAGI application command).\n" \
         "agi_vars attribute will be set to a dictionary containing all the initial" \
         " AGI variable definitions passed from Asterisk."
-        self.Debug = False # can be set to True by caller
+        self.debug = False # can be set to True by caller
         if from_asterisk == None :
             from_asterisk = sys.stdin
         #end if
@@ -370,13 +366,13 @@ class AGI :
 
     def request(self, req) :
         "send a generic request line and return a 3-tuple of (code, text, rest) on success."
-        if self.Debug  :
+        if self.debug  :
             sys.stderr.write("sending request: %s\n" % repr(req))
         #end if
         self.to_asterisk.write(req + "\n")
         self.to_asterisk.flush()
         line = self.from_asterisk.readline().rstrip("\n")
-        if self.Debug :
+        if self.debug :
             sys.stderr.write("first response line: %s\n" % repr(line))
         #end if
         if not line.startswith("200") :

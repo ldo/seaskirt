@@ -9,7 +9,7 @@ import os
 import socket
 
 class Manager :
-    """simple management of an Asterisk Manager API connection."""
+    "simple management of an Asterisk Manager API connection."
 
     NL = "\015\012" # protocol line delimiter
 
@@ -31,7 +31,7 @@ class Manager :
     #end Sanitize
 
     def SendRequest(self, Action, Parms, Vars = None) :
-        """sends a request to the Manager."""
+        "sends a request to the Manager."
         ToSend = "Action: " + Action + self.NL
         for Parm in Parms.keys() :
             ToSend += Parm + ": " + self.Sanitize(Parms[Parm]) + self.NL
@@ -54,7 +54,7 @@ class Manager :
     #end SendRequest
 
     def GetResponse(self) :
-        """reads and parses another response from the Asterisk Manager connection."""
+        "reads and parses another response from the Asterisk Manager connection."
         Response = {}
         while True :
             Split = self.Buff.split(self.NL, 1)
@@ -86,16 +86,16 @@ class Manager :
     #end GetResponse
 
     def GotMoreResponse(self) :
-        """returns True iff there's another response from the Asterisk Manager
-        connection in the buffer waiting to be parsed and returned."""
+        "returns True iff there’s another response from the Asterisk Manager" \
+        " connection in the buffer waiting to be parsed and returned."
         return len(self.Buff.split(self.NL + self.NL, 1)) == 2
     #end GotMoreResponse
 
     def Transact(self, Action, Parms, Vars = None) :
-        """does a basic transaction and returns the single response
-        or sequence of responses. Note this doesn't currently handle
-        commands like "IAXpeers" or "Queues" that don't return
-        response lines in the usual "keyword: value" format."""
+        "does a basic transaction and returns the single response" \
+        " or sequence of responses. Note this doesn’t currently handle" \
+        " commands like “IAXpeers” or “Queues” that don’t return" \
+        " response lines in the usual “keyword: value” format."
         self.SendRequest(Action, Parms, Vars)
         MultiResponse = self.AutoMultiResponse.get(Action.lower())
         if MultiResponse != None :
@@ -137,10 +137,10 @@ class Manager :
     #end Transact
 
     def Authenticate(self, Username, Password, WantEvents = False) :
-        """logs in with a username and password. This is mandatory
-        after opening the connection, before trying any other
-        commands. WantEvents indicates whether you want to receive
-        unsolicited event notifications on this connection."""
+        "logs in with a username and password. This is mandatory" \
+        " after opening the connection, before trying any other" \
+        " commands. want_events indicates whether you want to receive" \
+        " unsolicited event notifications on this connection."
         Parms = \
             {
                 "Username" : Username,
@@ -160,7 +160,7 @@ class Manager :
     #end Authenticate
 
     def DoCommand(self, Command) :
-        """does a Command request and returns the response text."""
+        "does a Command request and returns the response text."
         self.SendRequest("Command", {"Command" : Command})
         Response = ""
         FirstResponse = True
@@ -226,8 +226,8 @@ class Manager :
     #end DoCommand
 
     def GetQueueStatus(self) :
-        """does a QueueStatus request and returns the parsed response as a list
-        of entries, one per queue."""
+        "does a QueueStatus request and returns the parsed response as a list" \
+        " of entries, one per queue."
         Response = self.Transact("QueueStatus", {})
         Result = {}
         Responses = iter(Response)
@@ -265,7 +265,7 @@ class Manager :
     #end GetQueueStatus
 
     def GetChannels(self) :
-        """gets information on all currently-existing channels."""
+        "gets information on all currently-existing channels."
         Result = []
         Fields = \
             (
@@ -292,8 +292,8 @@ class Manager :
     #end GetChannels
 
     def __init__(self, Host = "127.0.0.1", Port = 5038, Timeout = None) :
-        """opens connection and receives initial Hello message
-        from Asterisk."""
+        "opens connection and receives initial Hello message" \
+        " from Asterisk."
         self.Debug = False # can be set to True by caller
         self.TheConn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         if Timeout != None :
@@ -316,30 +316,30 @@ class Manager :
     #end __init__
 
     def fileno(self) :
-        """allows use in a select, for example to check if
-        any unsolicited events are available to be read."""
+        "allows use in a select, for example to check if" \
+        " any unsolicited events are available to be read."
         return self.TheConn.fileno()
     #end fileno
 
     def close(self) :
-        """closes the Asterisk Manager connection."""
+        "closes the Asterisk Manager connection."
         self.TheConn.close()
     #end close
 
 #end Manager
 
 class AGI :
-    """for use by a script invoked via the AGI, DeadAGI or EAGI dialplan commands."""
+    "for use by a script invoked via the AGI, DeadAGI or EAGI dialplan commands."
 
     def __init__(self, from_asterisk = None, to_asterisk = None, args = None, EAGI = False) :
-        """from_asterisk and to_asterisk are file objects to use to communicate
-        with Asterisk; default to sys.stdin and sys.stdout if not specified, while
-        args are taken from sys.argv if not specified.
-        EAGI indicates whether to set audio_in attribute to a file object for
-        reading linear PCM audio from the channel (only possible if the script
-        was invoked via the EAGI application command).
-        agi_vars attribute will be set to a dictionary containing all the initial
-        AGI variable definitions passed from Asterisk."""
+        "from_asterisk and to_asterisk are file objects to use to communicate" \
+        " with Asterisk; default to sys.stdin and sys.stdout if not specified, while" \
+        " args are taken from sys.argv if not specified.\n" \
+        "EAGI indicates whether to set audio_in attribute to a file object for" \
+        " reading linear PCM audio from the channel (only possible if the script" \
+        " was invoked via the EAGI application command).\n" \
+        "agi_vars attribute will be set to a dictionary containing all the initial" \
+        " AGI variable definitions passed from Asterisk."
         self.Debug = False # can be set to True by caller
         if from_asterisk == None :
             from_asterisk = sys.stdin
@@ -369,7 +369,7 @@ class AGI :
     #end __init__
 
     def request(self, req) :
-        """send a generic request line and return a 3-tuple of (code, text, rest) on success."""
+        "send a generic request line and return a 3-tuple of (code, text, rest) on success."
         if self.Debug  :
             sys.stderr.write("sending request: %s\n" % repr(req))
         #end if
@@ -419,7 +419,7 @@ class AGI :
     # could implement more of those listed here <http://www.voip-info.org/wiki/view/Asterisk+AGI>
 
     def get_variable(self, varname) :
-        """returns the value of the specified Asterisk global, or None if not defined."""
+        "returns the value of the specified Asterisk global, or None if not defined."
         return \
             self.request("GET VARIABLE %s" % varname)[1]
     #end get_variable

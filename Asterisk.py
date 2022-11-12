@@ -49,7 +49,8 @@ class Manager :
     #end sanitize
 
     def send_request(self, action, parms, vars = None) :
-        "sends a request to the Manager."
+        "sends a request to the Manager, leaving it up to you to retrieve" \
+        " any subsequent response with get_response."
         to_send = "Action: " + action + self.NL
         for parm in parms.keys() :
             to_send += parm + ": " + self.sanitize(parms[parm]) + self.NL
@@ -72,7 +73,9 @@ class Manager :
     #end send_request
 
     def get_response(self) :
-        "reads and parses another response from the Asterisk Manager connection."
+        "reads and parses another response from the Asterisk Manager connection." \
+        " This can be a reply to a prior request, or it can be an unsolicited event" \
+        " notification, if you have enabled those on this connection."
         response = {}
         while True :
             split = self.buff.split(self.NL, 1)

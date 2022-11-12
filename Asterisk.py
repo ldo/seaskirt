@@ -15,6 +15,7 @@ class Manager :
 
     auto_multi_response = \
       { # table of actions which are automatically recognized as being multi_response.
+        # Values are event types indicating last response to that action.
         # Note keys are lowercase, while values are case-sensitive.
         "agents" : "AgentsComplete",
         "bridgelist" : "BridgeListComplete",

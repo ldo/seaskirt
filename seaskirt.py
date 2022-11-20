@@ -207,39 +207,26 @@ class Manager :
                       )
                 #end if
             #end while
-            if self.buff.startswith(self.NL) :
-                # newer Asterisk terminates multiple responses with blank line
-                break
             if self.buff.find(self.NL) < 0 :
                 break
-            if first_response :
-                line, self.buff = self.buff.split(self.NL, 1)
-                items = line.split(": ", 1)
-                if len(items) == 2 :
-                    if items[0] == "Response" :
-                        status = items[1]
-                        if status not in ("Follows", "Success") :
-                            raise RuntimeError \
-                              (
-                                "Command failed -- %s" % (status,)
-                              )
-                        #end if
+            line, self.buff = self.buff.split(self.NL, 1)
+            if len(line) == 0 :
+                break
+            items = line.split(": ", 1)
+            if len(items) == 2 :
+                if items[0] == "Response" :
+                    assert first_response
+                    status = items[1]
+                    if status not in ("Follows", "Success") :
+                        raise RuntimeError \
+                          (
+                            "Command failed -- %s" % (status,)
+                          )
                     #end if
-                else :
                     first_response = False
-                    self.buff = line + self.NL + self.buff
-                    if status == None :
-                        raise RuntimeError("No Response received for Command")
-                    #end if
-                #end if
-            #end if
-            if not first_response :
-                items = self.buff.split("--END COMMAND--" + self.NL + self.NL, 1)
-                # Note this doesn’t happen with newer Asterisk any more
-                if len(items) == 2 :
-                    response = items[0]
-                    self.buff = items[1]
-                    break
+                elif items[0] == "Output" :
+                    assert not first_response
+                    response += items[1] + "\n"
                 #end if
             #end if
         #end while

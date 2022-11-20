@@ -330,8 +330,12 @@ class Manager :
     #end fileno
 
     def close(self) :
-        "closes the Asterisk Manager connection."
-        self.the_conn.close()
+        "closes the Asterisk Manager connection. Calling this on an" \
+        " already-closed connection is harmless."
+        if self.the_conn != None :
+            self.the_conn.close()
+            self.the_conn = None
+        #end if
     #end close
 
 #end Manager

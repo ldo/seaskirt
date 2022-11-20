@@ -308,10 +308,10 @@ class Manager :
         return result
     #end get_channels
 
-    def __init__(self, host = "127.0.0.1", port = 5038, timeout = None) :
+    def __init__(self, host = "127.0.0.1", port = 5038, *, timeout = None, debug = False) :
         "opens connection and receives initial Hello message" \
         " from Asterisk."
-        self.debug = False # can be set to True by caller
+        self.debug = debug
         self.the_conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         if timeout != None :
             self.the_conn.settimeout(timeout)
@@ -325,11 +325,15 @@ class Manager :
                 self.EOF = True
                 break
             #end if
-            self.buff += more.decode()
+            more = more.decode()
+            if self.debug :
+                sys.stderr.write("init got more: %s\n" % repr(more))
+            #end if
+            self.buff += more
             if self.buff.find(self.NL) >= 0 :
                 break
         #end while
-        (self.hello, self.buff) = self.buff.split(self.NL, 1)
+        self.hello, self.buff = self.buff.split(self.NL, 1)
     #end __init__
 
     def fileno(self) :
@@ -348,7 +352,7 @@ class Manager :
 class AGI :
     "for use by a script invoked via the AGI, DeadAGI or EAGI dialplan commands."
 
-    def __init__(self, from_asterisk = None, to_asterisk = None, args = None, EAGI = False) :
+    def __init__(self, *, from_asterisk = None, to_asterisk = None, args = None, EAGI = False) :
         "from_asterisk and to_asterisk are file objects to use to communicate" \
         " with Asterisk; default to sys.stdin and sys.stdout if not specified, while" \
         " args are taken from sys.argv if not specified.\n" \

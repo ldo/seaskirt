@@ -8,6 +8,16 @@ import sys
 import os
 import socket
 
+def naturals() :
+    "returns the sequence of natural numbers. May be used as a" \
+    " unique-id generator."
+    i = 0
+    while True :
+        i += 1
+        yield i
+    #end while
+#end naturals
+
 class Manager :
     "simple management of an Asterisk Manager API connection."
 
@@ -52,6 +62,9 @@ class Manager :
         "sends a request to the Manager, leaving it up to you to retrieve" \
         " any subsequent response with get_response."
         to_send = "Action: " + action + self.NL
+        if self.id_gen != None :
+            to_send += "ActionID: %d%s" % (next(self.id_gen), self.NL)
+        #end if
         for parm in parms.keys() :
             to_send += parm + ": " + self.sanitize(parms[parm]) + self.NL
         #end for
@@ -295,11 +308,12 @@ class Manager :
         return result
     #end get_channels
 
-    def __init__(self, host = "127.0.0.1", port = 5038, *, timeout = None, debug = False) :
+    def __init__(self, host = "127.0.0.1", port = 5038, *, id_gen = None, timeout = None, debug = False) :
         "opens connection and receives initial Hello message" \
         " from Asterisk."
         self.debug = debug
         self.the_conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.id_gen = id_gen
         if timeout != None :
             self.the_conn.settimeout(timeout)
         #end if

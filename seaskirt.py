@@ -21,7 +21,7 @@ class Manager :
         "bridgelist" : "BridgeListComplete",
         "devicestatelist" : "DeviceStateListComplete",
         "extensionstatelist" : "ExtensionStateListComplete",
-        "faxsessions" : "FaxSessionsComplete",
+        "faxsessions" : "FAXSessionsComplete",
         "iaxpeerlist" : "PeerlistComplete",
         "iaxpeers" : "PeerlistComplete",
         "iaxregistry" : "RegistrationsComplete",

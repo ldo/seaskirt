@@ -1,0 +1,148 @@
+`seaskirt` is yet another Python wrapper for communicating with the
+[Asterisk](https://wiki.asterisk.org/wiki/display/AST/Home)
+open-source telephony engine.
+
+
+Asterisk APIs
+=============
+
+Asterisk has accumulated a slightly bewildering variety of
+communication APIs over its long history.
+
+To start with, there is the
+[**Asterisk Manager Interface**](https://wiki.asterisk.org/wiki/display/AST/The+Asterisk+Manager+TCP+IP+API)
+(or “AMI”). Asterisk listens for Manager connections (by default on TCP port 5038),
+which have to be authenticated according to a valid username+password
+combination from the settings in `manager.conf` or `manager.d/*`. Once a client has opened
+and authenticated a manager connection, it can request _actions_ to perform
+(information about these can be obtained from the Asterisk console with
+the command “`manager show actions`”), and it can also listen for
+unsolicited _events_ (from the list from the “`manager show events`” command).
+
+Then, there is the
+[**Asterisk Gateway Interface**](https://wiki.asterisk.org/wiki/pages/viewpage.action?pageId=32375589)
+(or “AGI”). Here, Asterisk initiates the connection to your program,
+either by launching it in a child process using the
+[`AGI`](https://wiki.asterisk.org/wiki/display/AST/Application_AGI)
+or [`EAGI`](https://wiki.asterisk.org/wiki/display/AST/Application_EAGI)
+dialplan applications, or by connecting to your already-running process
+listening on some specified port via the
+[FastAGI protocol](https://www.voip-info.org/asterisk-agi/).
+
+The set of requests your AGI program can send to Asterisk is listed in
+the output from the “`agi show commands`” console command. Meanwhile,
+execution of the dialplan context is suspended until the AGI
+connection terminates, or the call is hung up.
+
+Originally, there was essentially no overlap in the functionality
+offered by these two separate communication interfaces. AMI let you
+perform operations affecting Asterisk as a whole, and even initiate
+calls and do some manipulation of them. But you could not, for
+example, listen for DTMF tones on a channel; that was the province of
+AGI. Conversely, an AGI connection could send audio from a file and
+listen for DTMF digits, but it could only operate on a single call,
+with no way to perform operations across multiple calls without
+complicated juggling of multiple AGI connections.
+
+So, in
+[Asterisk version 10](https://wiki.asterisk.org/wiki/display/AST/New+in+10)
+(as near as I can tell) from 2011, the
+[AsyncAGI option](https://wiki.asterisk.org/wiki/display/AST/Asterisk+14+Application_AGI)
+was introduced. If the application command
+
+    AGI(agi:async)
+
+is executed on a channel, then the channel enters the AsyncAGI state:
+it stops executing further dialplan applications from the context
+definition, and instead, it now expects to be driven via AGI commands
+delivered on an AMI connection. These commands are sent using the
+special
+[“`AGI`” manager action](https://wiki.asterisk.org/wiki/display/AST/ManagerAction_AGI),
+and must include a reference to the channel being controlled (which
+must be in the AsyncAGI state).
+
+The AMI client can cause the channel to leave the AsyncAGI state
+either by hanging up the call, or by resuming execution of the context
+definition with the `asyncagi break` AGI command, which you should see
+in the list from “`agi show commands`”.
+
+Early versions of the AMI protocol had some rather ad-hoc behaviour.
+For example, trying to determine whether a request would trigger a single
+response or multiple responses required a lot of special casing.
+But with
+[Asterisk 12 from 2014](https://wiki.asterisk.org/wiki/display/AST/New+in+12),
+we now have the
+[AMI v2 specification](https://wiki.asterisk.org/wiki/display/AST/AMI+v2+Specification).
+While that document is not complete on its own, evidence from
+experiments elsewhere suggest that the protocol is now
+a lot more regular.
+
+Asterisk 12 also introduced yet another communication API, the
+[**Asterisk RESTful Interface**](https://wiki.asterisk.org/wiki/pages/viewpage.action?pageId=29395573)
+(or “ARI”). This looks like it is meant as a complete replacement
+for both AMI and AGI, though of course the older communication mechanisms
+continue to be supported, likely indefinitely.
+
+ARI is accessed through Asterisk’s mini-HTTP server, which listens by default
+on port 8088. Note that this has its own authentication setup defined in `ari.conf`,
+separate from the AMI one. At the same time, the ability was also introduced to
+[operate AMI over HTTP](https://wiki.asterisk.org/wiki/display/AST/Allow+Manager+Access+via+HTTP),
+but it appears this is now deprecated.
+
+[ARI requests](https://wiki.asterisk.org/wiki/display/AST/Asterisk+12+ARI)
+are implemented as HTTP requests of various types; note the use of
+`PUT`, `POST` and `DELETE` requests to cause state changes, for example, while
+`GET` is used to retrieve information.
+
+Further, channels can be put into “stasis”, suspending further
+execution of dialplan applications from the context definition
+(similar to AsyncAGI state). In this state, the channel can be told to
+execute arbitrary dialplan applications via direct ARI requests. The
+channel exits from stasis when the call is hung up, or a client posts
+the `/channels/`_channelid_`/continue` REST method call.
+
+The
+[`Stasis`](https://wiki.asterisk.org/wiki/display/AST/Asterisk+12+Application_Stasis)
+dialplan application, which puts the channel into stasis,
+supports the concept of custom “application names”. This
+allows a suitable client program (which can be the same one
+initiating ARI requests, or a different one) to listen for
+events related to that application via a
+[WebSocket connection](https://wiki.asterisk.org/wiki/display/AST/Getting+Started+with+ARI#GettingStartedwithARI-ConfiguringAsterisk)
+with parameters specifying that same custom application name. It will
+now receive notifications (in JSON format) each time something happens
+on channels that are currently in stasis in that application name.
+
+In fact, it is a
+[**requirement**](https://wiki.asterisk.org/wiki/display/AST/Asterisk+Configuration+for+ARI)
+for there to be a WebSocket listener
+for an application name before any channel is allowed to enter
+stasis for that application.
+
+According to this [blog post](https://www.asterisk.org/stasis-improvements-goodbye-dialplan/),
+Asterisk 16.3 also added the capability in 2019 to create new channels
+entirely from thin air with ARI calls, without reference to any
+contexts defined in the dialplan.
+
+
+The State Of Python Wrappers
+============================
+
+Looking at the available Python wrappers for the above APIs,
+things seem rather fragmentary. The
+[official Asterisk source repositories](https://github.com/asterisk)
+include ones for AMI/AGI ([StarPy](https://github.com/asterisk/starpy))
+and ARI ([ari-py](https://github.com/asterisk/ari-py)). The former
+repo has seen no updates for about 2½ years as of this writing,
+and the latter nothing for about 8 years. In other words, both
+projects seem moribund.
+
+As for third-party alternatives,
+py-asterisk https://github.com/jeansch/py-asterisk -- AMI only
+panoramisk https://github.com/gawel/panoramisk/ -- AMI and FastAGI, no ARI
+asyncari https://github.com/M-o-a-T/asyncari/ -- ARI only
+
+TBD
+
+Lawrence D'Oliveiro <ldo@geek-central.gen.nz>
+2022 November 22

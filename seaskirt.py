@@ -493,7 +493,7 @@ class AGI :
 
 class ARI :
 
-    def __init__(self, host = "127.0.0.1", port = 8088, *, prefix = "", username, password) :
+    def __init__(self, host = "127.0.0.1", port = 8088, *, prefix = "/ari", username, password) :
         if prefix != "" and not prefix.startswith("/") :
             raise ValueError("nonempty prefix must start with “/”")
         #end if

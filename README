@@ -137,12 +137,15 @@ repo has seen no updates for about 2½ years as of this writing,
 and the latter nothing for about 8 years. In other words, both
 projects seem moribund.
 
-As for third-party alternatives,
-py-asterisk https://github.com/jeansch/py-asterisk -- AMI only
-panoramisk https://github.com/gawel/panoramisk/ -- AMI and FastAGI, no ARI
-asyncari https://github.com/M-o-a-T/asyncari/ -- ARI only
+The following table summarizes the state of third-party alternatives
+that I’m aware of, listing which Asterisk APIs they support and whether
+they work with `asyncio`.
 
-TBD
+| Name | AMI | AGI | ARI | `asyncio` |
+|----------|-----|----------|-----|----------|
+| [`py-asterisk`](https://github.com/jeansch/py-asterisk) | yes | no | no | no |
+| [`panoramisk`](https://github.com/gawel/panoramisk/) | yes | FastAGI only | no | yes |
+| [`asyncari`](https://github.com/M-o-a-T/asyncari/) | no | no | yes | via [`anyio`](https://github.com/agronholm/anyio) |
 
 Lawrence D'Oliveiro <ldo@geek-central.gen.nz>
-2022 November 22
+2022 November 24

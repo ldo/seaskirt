@@ -541,11 +541,11 @@ class ARI :
         else :
             paramsstr = ""
         #end if
-        url = self.url_base + self.prefix + path
+        url = self.url_base + self.prefix + path + paramsstr
         if self.debug :
-            sys.stderr.write("ARI request URL = %s\n" % (url + paramsstr))
+            sys.stderr.write("ARI request URL = %s\n" % url)
         #end if
-        with self.opener.open(urllib.request.Request(url + paramsstr, method = method)) as req :
+        with self.opener.open(urllib.request.Request(url, method = method)) as req :
             resp = req.read()
             if self.debug :
                 sys.stderr.write("raw resp = %s\n" % repr(resp))

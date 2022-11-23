@@ -500,9 +500,17 @@ class ARI :
         self.host = host
         self.port = port
         self.prefix = prefix
-        self.username = username
-        self.password = password
         self.debug = False
+        self.url_base = "http://%s:%d" % (self.host, self.port)
+        auth = urllib.request.HTTPBasicAuthHandler()
+        auth.add_password \
+          (
+            realm = "Asterisk REST Interface",
+            uri = self.url_base,
+            user = username,
+            passwd = password
+          )
+        self.opener = urllib.request.build_opener(auth)
     #end __init__
 
     def request(self, method, path, params) :
@@ -533,20 +541,11 @@ class ARI :
         else :
             paramsstr = ""
         #end if
-        url = "http://%s:%s" % (self.host, self.port) + self.prefix + path
+        url = self.url_base + self.prefix + path
         if self.debug :
             sys.stderr.write("ARI request URL = %s\n" % (url + paramsstr))
         #end if
-        auth = urllib.request.HTTPBasicAuthHandler()
-        auth.add_password \
-          (
-            realm = "Asterisk REST Interface",
-            uri = url,
-            user = self.username,
-            passwd = self.password
-          )
-        opener = urllib.request.build_opener(auth)
-        with opener.open(urllib.request.Request(url + paramsstr, method = method)) as req :
+        with self.opener.open(urllib.request.Request(url + paramsstr, method = method)) as req :
             resp = req.read()
             if self.debug :
                 sys.stderr.write("raw resp = %s\n" % repr(resp))

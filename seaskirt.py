@@ -1,12 +1,31 @@
 #+
 # Various useful Asterisk-related definitions.
 #
-# Created by Lawrence D'Oliveiro <ldo@geek-central.gen.nz>.
+# Copyright © 2007-2022 by Lawrence D'Oliveiro <ldo@geek-central.gen.nz>.
+#
+# This library is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
+#
+# This library is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with this library, in a file named COPYING; if not, write to the
+# Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+# Boston, MA 02110-1301, USA
 #-
 
 import sys
 import os
 import socket
+
+#+
+# Useful stuff
+#-
 
 def naturals() :
     "returns the sequence of natural numbers. May be used as a" \
@@ -17,6 +36,10 @@ def naturals() :
         yield i
     #end while
 #end naturals
+
+#+
+# Asterisk Manager Interface
+#-
 
 class Manager :
     "simple management of an Asterisk Manager API connection."
@@ -353,6 +376,10 @@ class Manager :
     #end close
 
 #end Manager
+
+#+
+# Asterisk Gateway Interface
+#-
 
 class AGI :
     "for use by a script invoked via the AGI, DeadAGI or EAGI dialplan commands."

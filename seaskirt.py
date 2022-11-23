@@ -491,6 +491,22 @@ class AGI :
 # Asterisk RESTful Interface
 #-
 
+class ARIError(Exception) :
+    "just to identify HTTP error codes returned from Asterisk ARI."
+
+    def __init__(self, code, reason, headers) :
+        self.code = code
+        self.reason = reason
+        self.headers = headers
+    #end __init__
+
+    def __str__(self) :
+        return \
+            "ARI Error %d: %s" % (self.code, self.reason)
+    #end __str__
+
+#end ARIError
+
 class ARI :
 
     def __init__(self, host = "127.0.0.1", port = 8088, *, prefix = "/ari", username, password) :
@@ -545,17 +561,27 @@ class ARI :
         if self.debug :
             sys.stderr.write("ARI request URL = %s\n" % url)
         #end if
-        with self.opener.open(urllib.request.Request(url, method = method)) as req :
-            resp = req.read()
-            if self.debug :
-                sys.stderr.write("raw resp = %s\n" % repr(resp))
-            #end if
-            if resp != b"" :
-                result = json.loads(resp)
-            else :
-                result = None
-            #end if
-        #end with
+        fail = None
+        try :
+            with self.opener.open(urllib.request.Request(url, method = method)) as req :
+                resp = req.read()
+            #end with
+        except urllib.error.HTTPError as reqfail :
+            # replace with my own exception object just so I don’t get those
+            # long tracebacks from the depths of urllib.
+            fail = ARIError(reqfail.code, reqfail.reason, reqfail.headers)
+        #end try
+        if fail != None :
+            raise fail
+        #end if
+        if self.debug :
+            sys.stderr.write("raw resp = %s\n" % repr(resp))
+        #end if
+        if resp != b"" :
+            result = json.loads(resp)
+        else :
+            result = None
+        #end if
         return \
             result
     #end request

@@ -22,6 +22,9 @@
 import sys
 import os
 import socket
+import urllib.parse
+import urllib.request
+import json
 
 #+
 # Useful stuff
@@ -36,6 +39,11 @@ def naturals() :
         yield i
     #end while
 #end naturals
+
+def quote_url(s) :
+    return \
+        urllib.parse.quote(s, safe = "")
+#end quote_url
 
 #+
 # Asterisk Manager Interface
@@ -478,3 +486,79 @@ class AGI :
     #end get_variable
 
 #end AGI
+
+#+
+# Asterisk RESTful Interface
+#-
+
+class ARI :
+
+    def __init__(self, host = "127.0.0.1", port = 8088, *, prefix = "", username, password) :
+        if prefix != "" and not prefix.startswith("/") :
+            raise ValueError("nonempty prefix must start with “/”")
+        #end if
+        self.host = host
+        self.port = port
+        self.prefix = prefix
+        self.username = username
+        self.password = password
+        self.debug = False
+    #end __init__
+
+    def request(self, method, path, params) :
+        if path != "" and not path.startswith("/") :
+            raise ValueError("nonempty path must start with “/”")
+        #end if
+        if params != None :
+            if (
+                    isinstance(params, dict)
+                and
+                    all(isinstance(k, str) and isinstance(v, (int, str)) for k, v in params.items())
+            ) :
+                paramsstr = "?" + "&".join \
+                  (
+                    "%s=%s" % (k, quote_url(str(v))) for k, v in params.items()
+                  )
+            elif (
+                    isinstance(params, tuple)
+                and
+                    all(isinstance(i, tuple) and len(i) == 2 for i in params)
+                and
+                    all(isinstance(k, str) and isinstance(v, (int, str)) for k, v in params)
+            ) :
+                paramsstr = "?" + "&".join("%s=%s" % (k, quote_url(str(v))) for k, v in params)
+            else :
+                raise TypeError("params are not a dict or tuple of suitable (key, value) pairs")
+            #end if
+        else :
+            paramsstr = ""
+        #end if
+        url = "http://%s:%s" % (self.host, self.port) + self.prefix + path
+        if self.debug :
+            sys.stderr.write("ARI request URL = %s\n" % (url + paramsstr))
+        #end if
+        auth = urllib.request.HTTPBasicAuthHandler()
+        auth.add_password \
+          (
+            realm = "Asterisk REST Interface",
+            uri = url,
+            user = self.username,
+            passwd = self.password
+          )
+        opener = urllib.request.build_opener(auth)
+        with opener.open(urllib.request.Request(url + paramsstr, method = method)) as req :
+            resp = req.read()
+            if self.debug :
+                sys.stderr.write("raw resp = %s\n" % repr(resp))
+            #end if
+            if resp != b"" :
+                result = json.loads(resp)
+            else :
+                result = None
+            #end if
+        #end with
+        return \
+            result
+    #end request
+
+#end ARI

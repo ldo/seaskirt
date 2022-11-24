@@ -142,7 +142,8 @@ that I’m aware of, listing which Asterisk APIs they support and whether
 they work with `asyncio`.
 
 | Name | AMI | AGI | ARI | `asyncio` |
-|----------|-----|----------|-----|----------|
+|----------|-----|----------|-----|------------|
+| [`pyst2`](https://github.com/jfernandz/pyst2) | yes | yes | no | no (uses threads) |
 | [`py-asterisk`](https://github.com/jeansch/py-asterisk) | yes | no | no | no |
 | [`panoramisk`](https://github.com/gawel/panoramisk/) | yes | FastAGI only | no | yes |
 | [`asyncari`](https://github.com/M-o-a-T/asyncari/) | no | no | yes | via [`anyio`](https://github.com/agronholm/anyio) |

@@ -54,35 +54,6 @@ class Manager :
 
     NL = "\015\012" # protocol line delimiter
 
-    auto_multi_response = \
-      { # table of actions which are automatically recognized as being multi_response.
-        # Values are event types indicating last response to that action.
-        # Note keys are lowercase, while values are case-sensitive.
-        "agents" : "AgentsComplete",
-        "bridgelist" : "BridgeListComplete",
-        "devicestatelist" : "DeviceStateListComplete",
-        "extensionstatelist" : "ExtensionStateListComplete",
-        "faxsessions" : "FAXSessionsComplete",
-        "iaxpeerlist" : "PeerlistComplete",
-        "iaxpeers" : "PeerlistComplete",
-        "iaxregistry" : "RegistrationsComplete",
-        "parkedcalls" : "ParkedCallsComplete",
-        "parkinglots" : "ParkinglotsComplete",
-        "pjsipshowauths" : "AuthListComplete",
-        "pjsipshowcontacts" : "ContactListComplete",
-        "pjsipshowendpoints" : "EndpointListComplete",
-        "pjsipshowregistrationinboundcontactstatuses" : "ContactStatusDetailComplete",
-        "pjsipshowregistrationsinbound" : "InboundRegistrationDetailComplete",
-        "pjsipshowregistrationsoutbound" : "OutboundRegistrationDetailComplete",
-        "pjsipshowsubscriptionsinbound" : "InboundSubscriptionDetailComplete",
-        "pjsipshowsubscriptionsoutbound" : "OutboundSubscriptionDetailComplete",
-        "presencestatelist" : "PresenceStateListComplete",
-        "queuestatus" : "QueueStatusComplete",
-        "sippeers" : "PeerlistComplete",
-        "status" : "StatusComplete",
-        "coreshowchannels" : "CoreShowChannelsComplete",
-      }
-
     @classmethod
     def sanitize(celf, parm) :
         # sanitizes the value of parm to avoid misbehaviour with Manager API syntax.
@@ -127,8 +98,12 @@ class Manager :
                 self.buff = split[1]
                 if len(split[0]) == 0 :
                     break
-                (keyword, value) = split[0].split(": ", 1)
-                response[keyword] = value
+                keyword, value = split[0].split(": ", 1)
+                if keyword in response :
+                    response[keyword] += "\n" + value
+                else :
+                    response[keyword] = value
+                #end if
             else :
                 if self.debug :
                     sys.stderr.write("Getting more\n")
@@ -158,45 +133,43 @@ class Manager :
 
     def transact(self, action, parms, vars = None) :
         "does a basic transaction and returns the single response" \
-        " or sequence of responses. Note this doesn’t currently handle" \
-        " commands like “IAXpeers” or “Queues” that don’t return" \
-        " response lines in the usual “keyword: value” format."
+        " or sequence of responses."
         self.send_request(action, parms, vars)
-        multi_response = self.auto_multi_response.get(action.lower())
-        if multi_response != None :
-            response = []
-            first_response = True
-            while True :
-                next_response = self.get_response()
-                if self.EOF or len(next_response) == 0 :
-                    break
-                if self.debug :
-                    sys.stderr.write \
+        response = []
+        multi_response = False # to begin with
+        first_response = True
+        while True :
+            next_response = self.get_response()
+            if self.EOF or len(next_response) == 0 :
+                break
+            if self.debug :
+                sys.stderr.write \
+                  (
+                    "next_response: \"%s\"\n" % repr(next_response)
+                  )
+            #end if
+            if first_response :
+                # check for success/failure
+                if next_response.get("Response") not in ("Success", "Goodbye") :
+                    raise RuntimeError \
                       (
-                        "next_response: \"%s\"\n" % repr(next_response)
+                        "%s failed -- %s" % (action, next_response.get("Message", "?"))
                       )
                 #end if
-                if first_response :
-                    # check for success/failure
-                    if not next_response.get("Response", None) == "Success" :
-                        raise RuntimeError \
-                          (
-                            "%s failed -- %s" % (action, next_response.get("Message", "?"))
-                          )
-                    #end if
-                    first_response = False
-                else :
-                    response.append(next_response)
-                    if (
-                            type(multi_response) == str
-                        and
-                            next_response.get("Event", None) == multi_response
-                    ) :
-                        break
+                first_response = False
+                if next_response.get("EventList") == "start" :
+                    multi_response = True
                 #end if
-            #end while
-        else :
-            response = self.get_response()
+            #end if
+            response.append(next_response)
+            if not multi_response :
+                break
+            if next_response.get("EventList") == "Complete" :
+                break
+        #end while
+        if not multi_response :
+            assert len(response) == 1
+            response, = response
         #end if
         return response
     #end transact

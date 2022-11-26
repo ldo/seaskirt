@@ -21,6 +21,7 @@
 
 import sys
 import os
+import enum
 import socket
 import urllib.parse
 import urllib.request
@@ -476,6 +477,15 @@ class ARIError(Exception) :
 
 #end ARIError
 
+class ARIMETHOD(enum.Enum) :
+    "recognized HTTP methods used for ARI."
+    DELETE = "DELETE"
+    GET = "GET"
+    POST = "POST"
+    PUT = "PUT"
+
+#end ARIMETHOD
+
 class ARI :
 
     def __init__(self, host = "127.0.0.1", port = 8088, *, prefix = "/ari", username, password) :
@@ -499,6 +509,9 @@ class ARI :
     #end __init__
 
     def request(self, method, path, params) :
+        if not isinstance(method, ARIMETHOD) :
+            raise TypeError("method must be an instance of ARIMETHOD")
+        #end if
         if path != "" and not path.startswith("/") :
             raise ValueError("nonempty path must start with “/”")
         #end if
@@ -532,7 +545,7 @@ class ARI :
         #end if
         fail = None
         try :
-            with self.opener.open(urllib.request.Request(url, method = method)) as req :
+            with self.opener.open(urllib.request.Request(url, method = method.value)) as req :
                 resp = req.read()
             #end with
         except urllib.error.HTTPError as reqfail :

@@ -479,10 +479,26 @@ class ARIError(Exception) :
 
 class ARIMETHOD(enum.Enum) :
     "recognized HTTP methods used for ARI."
-    DELETE = "DELETE"
-    GET = "GET"
-    POST = "POST"
-    PUT = "PUT"
+
+    # methodstr, changes_state
+    DELETE = ("DELETE", True)
+    GET = ("GET", False)
+    POST = ("POST", True)
+    PUT = ("PUT", True)
+
+    @property
+    def methodstr(self) :
+        "the HTTP method string."
+        return \
+            self.value[0]
+    #end methodstr
+
+    @property
+    def changes_state(self) :
+        "whether this method changes state on the server."
+        return \
+            self.value[1]
+    #end changes_state
 
 #end ARIMETHOD
 
@@ -545,7 +561,7 @@ class ARI :
         #end if
         fail = None
         try :
-            with self.opener.open(urllib.request.Request(url, method = method.value)) as req :
+            with self.opener.open(urllib.request.Request(url, method = method.methodstr)) as req :
                 resp = req.read()
             #end with
         except urllib.error.HTTPError as reqfail :

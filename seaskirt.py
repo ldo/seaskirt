@@ -60,6 +60,50 @@ class Manager :
         return str(parm).replace("\n", "")
     #end sanitize
 
+    def __init__(self, host = "127.0.0.1", port = 5038, *, id_gen = None, timeout = None, debug = False) :
+        "opens connection and receives initial Hello message" \
+        " from Asterisk."
+        self.debug = debug
+        self.the_conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.id_gen = id_gen
+        if timeout != None :
+            self.the_conn.settimeout(timeout)
+        #end if
+        self.the_conn.connect((host, port))
+        self.buff = ""
+        self.EOF = False
+        while True : # get initial hello msg
+            more = self.the_conn.recv(256) # msg is small
+            if len(more) == 0 :
+                self.EOF = True
+                break
+            #end if
+            more = more.decode()
+            if self.debug :
+                sys.stderr.write("init got more: %s\n" % repr(more))
+            #end if
+            self.buff += more
+            if self.buff.find(self.NL) >= 0 :
+                break
+        #end while
+        self.hello, self.buff = self.buff.split(self.NL, 1)
+    #end __init__
+
+    def close(self) :
+        "closes the Asterisk Manager connection. Calling this on an" \
+        " already-closed connection is harmless."
+        if self.the_conn != None :
+            self.the_conn.close()
+            self.the_conn = None
+        #end if
+    #end close
+
+    def fileno(self) :
+        "allows use in a select, for example to check if" \
+        " any unsolicited events are available to be read."
+        return self.the_conn.fileno()
+    #end fileno
+
     def send_request(self, action, parms, vars = None) :
         "sends a request to the Manager, leaving it up to you to retrieve" \
         " any subsequent response with get_response."
@@ -311,50 +355,6 @@ class Manager :
         #end for
         return result
     #end get_channels
-
-    def __init__(self, host = "127.0.0.1", port = 5038, *, id_gen = None, timeout = None, debug = False) :
-        "opens connection and receives initial Hello message" \
-        " from Asterisk."
-        self.debug = debug
-        self.the_conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.id_gen = id_gen
-        if timeout != None :
-            self.the_conn.settimeout(timeout)
-        #end if
-        self.the_conn.connect((host, port))
-        self.buff = ""
-        self.EOF = False
-        while True : # get initial hello msg
-            more = self.the_conn.recv(256) # msg is small
-            if len(more) == 0 :
-                self.EOF = True
-                break
-            #end if
-            more = more.decode()
-            if self.debug :
-                sys.stderr.write("init got more: %s\n" % repr(more))
-            #end if
-            self.buff += more
-            if self.buff.find(self.NL) >= 0 :
-                break
-        #end while
-        self.hello, self.buff = self.buff.split(self.NL, 1)
-    #end __init__
-
-    def fileno(self) :
-        "allows use in a select, for example to check if" \
-        " any unsolicited events are available to be read."
-        return self.the_conn.fileno()
-    #end fileno
-
-    def close(self) :
-        "closes the Asterisk Manager connection. Calling this on an" \
-        " already-closed connection is harmless."
-        if self.the_conn != None :
-            self.the_conn.close()
-            self.the_conn = None
-        #end if
-    #end close
 
 #end Manager
 

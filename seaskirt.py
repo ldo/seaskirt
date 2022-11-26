@@ -124,11 +124,7 @@ class Manager :
         if self.debug :
             sys.stderr.write(to_send)
         #end if
-        to_send = to_send.encode()
-        while len(to_send) != 0 :
-            sent = self.the_conn.send(to_send)
-            to_send = to_send[sent:]
-        #end while
+        sent = self.the_conn.sendall(to_send.encode())
     #end send_request
 
     def get_response(self) :

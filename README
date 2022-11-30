@@ -2,9 +2,34 @@
 [Asterisk](https://wiki.asterisk.org/wiki/display/AST/Home)
 open-source telephony engine.
 
+I first put this module together about a decade and a half ago, when I
+was first learning about Asterisk and Python. Then more recently I
+dusted it off, and updated it for Python 3 and more recent Asterisk
+versions (specifically, tested with Asterisk 16 and Asterisk 20),
+adding very basic support for Asterisk’s newer ARI protocol.
 
-Asterisk APIs
-=============
+I know there are more elaborate alternatives available elsewhere (see
+the list below), but I thought I would keep this one simple. For
+example, if you want to run an event listener, I don’t provide any
+elaborate pattern-matching mechanism for you to register which events
+matter to you: your listener gets everything, and it is up to you to
+decide which ones to look at and which ones to ignore.
+
+**Event-loop support:** This is pretty rudimentary at the moment.
+All communication transactions are currently required to be synchronous.
+However, the `Manager` object does implement a `fileno()` method,
+allowing it to be passed to `select`/`poll` calls to check for incoming
+unsolicited events. If the return from the call indicates something is waiting,
+to be read, you can call the `get_response()` method to (synchronously)
+obtain the response.
+
+I will likely include a more asynchronous way of working, including
+more direct `asyncio` support at some point, thought I haven’t quite
+decided what form this should take.
+
+
+The Asterisk API Zoo
+====================
 
 Asterisk has accumulated a slightly bewildering variety of
 communication APIs over its long history.
@@ -108,7 +133,7 @@ supports the concept of custom “application names”. This
 allows a suitable client program (which can be the same one
 initiating ARI requests, or a different one) to listen for
 events related to that application via a
-[WebSocket connection](https://wiki.asterisk.org/wiki/display/AST/Getting+Started+with+ARI#GettingStartedwithARI-ConfiguringAsterisk)
+[WebSocket client connection](https://wiki.asterisk.org/wiki/display/AST/Getting+Started+with+ARI#GettingStartedwithARI-ConfiguringAsterisk)
 with parameters specifying that same custom application name. It will
 now receive notifications (in JSON format) each time something happens
 on channels that are currently in stasis in that application name.
@@ -137,7 +162,7 @@ repo has seen no updates for about 2½ years as of this writing,
 and the latter nothing for about 8 years. In other words, both
 projects seem moribund.
 
-The following table summarizes the state of third-party alternatives
+The following table summarizes the state of other Python wrappers
 that I’m aware of, listing which Asterisk APIs they support and whether
 they work with `asyncio`.
 
@@ -149,4 +174,4 @@ they work with `asyncio`.
 | [`asyncari`](https://github.com/M-o-a-T/asyncari/) | no | no | yes | via [`anyio`](https://github.com/agronholm/anyio) |
 
 Lawrence D'Oliveiro <ldo@geek-central.gen.nz>
-2022 November 24
+2022 November 30

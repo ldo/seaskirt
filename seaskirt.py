@@ -359,14 +359,14 @@ class Manager :
 # Asterisk Gateway Interface
 #-
 
-class AGI :
+class Gateway :
     "for use by a script invoked via the AGI, DeadAGI or EAGI dialplan commands."
 
-    def __init__(self, *, from_asterisk = None, to_asterisk = None, args = None, EAGI = False) :
+    def __init__(self, *, from_asterisk = None, to_asterisk = None, args = None, with_audio_in = False) :
         "from_asterisk and to_asterisk are file objects to use to communicate" \
         " with Asterisk; default to sys.stdin and sys.stdout if not specified, while" \
         " args are taken from sys.argv if not specified.\n" \
-        "EAGI indicates whether to set audio_in attribute to a file object for" \
+        "with_audio_in indicates whether to set audio_in attribute to a file object for" \
         " reading linear PCM audio from the channel (only possible if the script" \
         " was invoked via the EAGI application command).\n" \
         "agi_vars attribute will be set to a dictionary containing all the initial" \
@@ -386,7 +386,7 @@ class AGI :
         self.from_asterisk = from_asterisk
         self.to_asterisk = to_asterisk
         self.audio_in = None
-        if EAGI :
+        if with_audio_in :
             self.audio_in = os.fdopen(3, "r")
         #end if
         self.agi_vars = {}
@@ -455,7 +455,7 @@ class AGI :
             self.request("GET VARIABLE %s" % varname)[1]
     #end get_variable
 
-#end AGI
+#end Gateway
 
 #+
 # Asterisk RESTful Interface
@@ -477,7 +477,7 @@ class ARIError(Exception) :
 
 #end ARIError
 
-class ARIMETHOD(enum.Enum) :
+class RESTMETHOD(enum.Enum) :
     "recognized HTTP methods used for ARI."
 
     # methodstr, changes_state
@@ -500,9 +500,9 @@ class ARIMETHOD(enum.Enum) :
             self.value[1]
     #end changes_state
 
-#end ARIMETHOD
+#end RESTMETHOD
 
-class ARI :
+class Stasis :
 
     def __init__(self, host = "127.0.0.1", port = 8088, *, prefix = "/ari", username, password) :
         if prefix != "" and not prefix.startswith("/") :
@@ -525,8 +525,8 @@ class ARI :
     #end __init__
 
     def request(self, method, path, params) :
-        if not isinstance(method, ARIMETHOD) :
-            raise TypeError("method must be an instance of ARIMETHOD")
+        if not isinstance(method, RESTMETHOD) :
+            raise TypeError("method must be an instance of RESTMETHOD")
         #end if
         if path != "" and not path.startswith("/") :
             raise ValueError("nonempty path must start with “/”")
@@ -584,4 +584,4 @@ class ARI :
             result
     #end request
 
-#end ARI
+#end Stasis

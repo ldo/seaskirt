@@ -19,7 +19,7 @@ decide which ones to look at and which ones to ignore.
 All communication transactions are currently required to be synchronous.
 However, the `Manager` object does implement a `fileno()` method,
 allowing it to be passed to `select`/`poll` calls to check for incoming
-unsolicited events. If the return from the call indicates something is waiting,
+unsolicited events. If the return from the call indicates something is waiting
 to be read, you can call the `get_response()` method to (synchronously)
 obtain the response.
 
@@ -150,6 +150,33 @@ entirely from thin air with ARI calls, without reference to any
 contexts defined in the dialplan.
 
 
+Actions Versus Events
+=====================
+
+Regardless of the manager interface (AMI or ARI), Asterisk still has the common
+concept of “actions” versus “events”. “Actions” are requests to Asterisk to do
+something (such as initiate or hangup a call, or just return some info), and it
+is probably best to distinguish _direct_ responses to such requests, versus
+_unsolicited_ events indicating interesting happenings within the Asterisk system
+(which might or might not be direct consequences of some prior action).
+For example, a typical response to “Originate” (dial) a call might be an
+indication that the call has successfully started, and there will likely be more
+events later as the call progresses and is eventually hung up, even while the
+same manager connection accepts additional requests to initiate other calls or
+do other things.
+
+In addition to this, in AMI in particular, it is possible to receive more than
+one response “event” from certain actions which might return variable amounts of
+information.
+
+Because these overlapping responses can get potentially confusing, it is
+probably best to create separate AMI connections for communicating
+requests/responses, versus ones just for listening to unsolicited events. In
+fact, ARI _enforces_ this separation, since the main REST protocol is only for
+requests/responses, while event listening has to be done by setting up a
+dedicated WebSocket connection.
+
+
 The State Of Python Wrappers
 ============================
 
@@ -174,4 +201,4 @@ they work with `asyncio`.
 | [`asyncari`](https://github.com/M-o-a-T/asyncari/) | no | no | yes | via [`anyio`](https://github.com/agronholm/anyio) |
 
 Lawrence D'Oliveiro <ldo@geek-central.gen.nz>
-2022 November 30
+2022 December 1

@@ -503,6 +503,8 @@ class RESTMETHOD(enum.Enum) :
 #end RESTMETHOD
 
 class Stasis :
+    "ARI protocol wrapper. Note that a new connection is made for every call to" \
+    " the request() method."
 
     def __init__(self, host = "127.0.0.1", port = 8088, *, prefix = "/ari", username, password) :
         if prefix != "" and not prefix.startswith("/") :
@@ -525,6 +527,8 @@ class Stasis :
     #end __init__
 
     def request(self, method, path, params) :
+        "initiates a request to the specified path with the specified params," \
+        " and returns a Python object decoded from the JSON response string."
         if not isinstance(method, RESTMETHOD) :
             raise TypeError("method must be an instance of RESTMETHOD")
         #end if

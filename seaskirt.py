@@ -541,7 +541,7 @@ class Stasis :
                 and
                     all(isinstance(k, str) and isinstance(v, (int, str)) for k, v in params.items())
             ) :
-                paramsstr = "?" + "&".join \
+                paramsstr = "&".join \
                   (
                     "%s=%s" % (k, quote_url(str(v))) for k, v in params.items()
                   )
@@ -552,14 +552,14 @@ class Stasis :
                 and
                     all(isinstance(k, str) and isinstance(v, (int, str)) for k, v in params)
             ) :
-                paramsstr = "?" + "&".join("%s=%s" % (k, quote_url(str(v))) for k, v in params)
+                paramsstr = "&".join("%s=%s" % (k, quote_url(str(v))) for k, v in params)
             else :
                 raise TypeError("params are not a dict or tuple of suitable (key, value) pairs")
             #end if
         else :
             paramsstr = ""
         #end if
-        url = self.url_base + self.prefix + path + paramsstr
+        url = self.url_base + self.prefix + path + ("", "?")[paramsstr != ""] + paramsstr
         if self.debug :
             sys.stderr.write("ARI request URL = %s\n" % url)
         #end if

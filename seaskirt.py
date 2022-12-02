@@ -23,9 +23,12 @@ import sys
 import os
 import enum
 import socket
+import base64
 import urllib.parse
 import urllib.request
 import json
+import wsproto
+import wsproto.events as wsevents
 
 #+
 # Useful stuff
@@ -502,9 +505,46 @@ class RESTMETHOD(enum.Enum) :
 
 #end RESTMETHOD
 
+class ARIPasswordHandler(urllib.request.BaseHandler) :
+    "password handler which only holds a single username/password pair" \
+    " for the expected Asterisk realm."
+
+    def __init__(self, username, password) :
+        self.realm = "Asterisk REST Interface"
+        self.username = username
+        self.password = password
+        self.authenticated = False
+    #end __init__
+
+    def add_password(self, realm, uri, user, passwd, is_authenticated = False) :
+        raise NotImplementedError("cannot add new passwords")
+    #end add_password
+
+    def find_user_password(self, realm, authuri) :
+        if realm == self.realm :
+            result = (self.username, self.password)
+        else :
+            result = (None, None)
+        #end if
+        return \
+            result
+    #end find_user_password
+
+    def update_authenticated(self, uri, is_authenticated) :
+        self.authenticated = is_authenticated
+    #end update_authenticated
+
+    def is_authenticated(self, authuri) :
+        return \
+            self.authenticated
+    #end is_authenticated
+
+#end ARIPasswordHandler
+
 class Stasis :
     "ARI protocol wrapper. Note that a new connection is made for every call to" \
-    " the request() method."
+    " the request() method. Use the listen() method to create a WebSocket client" \
+    " connection to listen for application events."
 
     def __init__(self, host = "127.0.0.1", port = 8088, *, prefix = "/ari", username, password) :
         if prefix != "" and not prefix.startswith("/") :
@@ -515,14 +555,8 @@ class Stasis :
         self.prefix = prefix
         self.debug = False
         self.url_base = "http://%s:%d" % (self.host, self.port)
-        auth = urllib.request.HTTPBasicAuthHandler()
-        auth.add_password \
-          (
-            realm = "Asterisk REST Interface",
-            uri = self.url_base,
-            user = username,
-            passwd = password
-          )
+        self.passwd = ARIPasswordHandler(username, password)
+        auth = urllib.request.HTTPBasicAuthHandler(self.passwd)
         self.opener = urllib.request.build_opener(auth)
     #end __init__
 
@@ -587,5 +621,107 @@ class Stasis :
         return \
             result
     #end request
+
+    class EventListener :
+        "wrapper for WebSocket client connection that returns decoded events. " \
+        " You can use the fileno() method with select/poll to monitor for" \
+        " incoming data, then call process() to read and process the data and" \
+        " yield any decoded events."
+
+        def __init__(self, parent, apps, subscribe_all) :
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.ws = wsproto.WSConnection(wsproto.ConnectionType.CLIENT)
+            self.sock.connect((parent.host, parent.port))
+            self.fileno = self.sock.fileno
+            self.EOF = self.closing = False
+            req = self.ws.send \
+              (
+                wsevents.Request
+                  (
+                    host = parent.host,
+                    target =
+                            "%s/events?app=%s&subscribeAll=%d"
+                        %
+                            (parent.prefix, ",".join(apps), int(subscribe_all)),
+                    extra_headers =
+                        [
+                            (
+                                "Authorization",
+                                    "Basic "
+                                +
+                                    base64.b64encode
+                                      (
+                                        ("%s:%s" % (parent.passwd.username, parent.passwd.password))
+                                            .encode()
+                                      ).decode(),
+                            ),
+                        ]
+                  )
+              )
+            self.sock.sendall(req)
+        #end __init__
+
+        def process(self) :
+            try :
+                data = self.sock.recv(4096, socket.MSG_DONTWAIT)
+            except BlockingIOError :
+                data = None
+            #end try
+            if data != None :
+                self.ws.receive_data(data)
+                if len(data) == 0 :
+                    self.EOF = True
+                #end if
+            #end if
+            for event in self.ws.events() :
+                if isinstance(event, wsevents.AcceptConnection) :
+                    print("connection accepted") # debug
+                elif isinstance(event, wsevents.RejectConnection) :
+                    raise RuntimeError("WebSockets connection rejected: code %d" % event.status_code)
+                elif isinstance(event, wsevents.CloseConnection) :
+                    print("connection closing") # debug
+                    if not self.closing :
+                        self.closing = True
+                        self.sock.send(self.ws.send(event.response()))
+                    #end if
+                elif isinstance(event, wsevents.Ping) :
+                    self.sock.send(self.ws.send(event.response()))
+                elif isinstance(event, wsevents.TextMessage) :
+                    if event.data != "" :
+                        result = json.loads(event.data)
+                    else :
+                        result = None
+                    #end if
+                    yield result
+                else :
+                    raise RuntimeError("unexpected WebSocket event %s -- %s" % (type(event).__name__, repr(event)))
+                #end if
+            #end for
+        #end process
+
+        def close(self) :
+            if self.sock != None :
+                if not self.closing :
+                    self.closing = True
+                    self.sock.send(self.ws.send(wsevents.CloseConnection(1000, "bye-bye")))
+                #end if
+                for event in self.process() :
+                    pass
+                #end for
+                self.sock.close()
+                self.sock = None
+            #end if
+        #end close
+
+    #end EventListener
+
+    def listen(self, apps, subscribe_all = False) :
+        "opens and returns a WebSocket connection to listen for ARI events." \
+        " apps is a list/tuple of application names, and subscribe_all can" \
+        " be set to True to enable these applications to receive all events."
+        result = type(self).EventListener(self, apps, subscribe_all)
+        return \
+            result
+    #end listen
 
 #end Stasis

@@ -623,7 +623,7 @@ class Stasis :
     #end request
 
     class EventListener :
-        "wrapper for WebSocket client connection that returns decoded events. " \
+        "wrapper for WebSocket client connection that returns decoded events." \
         " You can use the fileno() method with select/poll to monitor for" \
         " incoming data, then call process() to read and process the data and" \
         " yield any decoded events."

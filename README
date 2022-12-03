@@ -27,6 +27,11 @@ I will likely include a more asynchronous way of working, including
 more direct `asyncio` support at some point, thought I haven’t quite
 decided what form this should take.
 
+I haven’t done much documentation for this (besides what’s in the source
+module), but examples of its use can be found at
+[GitLab](https://gitlab.com/ldo/seaskirt_examples) and
+[GitHub](https://github.com/ldo/seaskirt_examples).
+
 
 The Asterisk API Zoo
 ====================
@@ -201,4 +206,4 @@ they work with `asyncio`.
 | [`asyncari`](https://github.com/M-o-a-T/asyncari/) | no | no | yes | via [`anyio`](https://github.com/agronholm/anyio) |
 
 Lawrence D'Oliveiro <ldo@geek-central.gen.nz>
-2022 December 1
+2022 December 3

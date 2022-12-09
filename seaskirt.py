@@ -1218,15 +1218,15 @@ class Stasis :
                     #end if
                 elif isinstance(event, wsevents.TextMessage) :
                     self.partial += event.data
-                    if event.message_finished :
-                        if self.partial != "" :
-                            result = json.loads(self.partial)
-                            self.partial = ""
-                        else :
-                            result = None
-                        #end if
-                        yield result
+                    if not event.message_finished :
+                        break
+                    if self.partial != "" :
+                        result = json.loads(self.partial)
+                        self.partial = ""
+                    else :
+                        result = None
                     #end if
+                    yield result
                 else :
                     raise RuntimeError("unexpected WebSocket event %s -- %s" % (type(event).__name__, repr(event)))
                 #end if

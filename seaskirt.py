@@ -361,7 +361,7 @@ def naturals() :
     i = 0
     while True :
         i += 1
-        yield i
+        yield str(i)
     #end while
 #end naturals
 
@@ -391,6 +391,9 @@ class Manager :
         self = super().__new__(celf)
         self.debug = debug
         self.the_conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        if id_gen != None and not hasattr(id_gen, "__next__") :
+            raise TypeError("id_gen is not an iterator")
+        #end if
         self.id_gen = id_gen
         self.last_request_id = None
         if timeout != None :
@@ -451,7 +454,7 @@ class Manager :
         " any subsequent response with get_response."
         to_send = "Action: " + action + self.NL
         if self.id_gen != None :
-            self.last_request_id = str(next(self.id_gen))
+            self.last_request_id = next(self.id_gen)
             to_send += "ActionID: %s%s" % (self.last_request_id, self.NL)
         #end if
         for parm in parms.keys() :

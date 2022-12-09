@@ -1049,6 +1049,13 @@ class ARIPasswordHandler(urllib.request.BaseHandler) :
             result
     #end find_user_password
 
+    # As far as I can tell, the urllib.request code is supposed to
+    # notice the existence of the following methods, and automatically
+    # generate an “Authorization” header line on the initial request,
+    # instead of waiting for a “401 Unauthorized” response before
+    # trying again. But looking at the traffic, this doesn’t seem to
+    # work.
+
     def update_authenticated(self, uri, is_authenticated) :
         self.authenticated = is_authenticated
     #end update_authenticated
@@ -1057,6 +1064,20 @@ class ARIPasswordHandler(urllib.request.BaseHandler) :
         return \
             self.authenticated
     #end is_authenticated
+
+    def make_basic_auth(self) :
+        "generate the contents of the “Authorization” header line myself."
+        return \
+            (
+                "Basic "
+            +
+                base64.b64encode
+                  (
+                    ("%s:%s" % (self.username, self.password))
+                        .encode()
+                  ).decode()
+            )
+    #end make_basic_auth
 
 #end ARIPasswordHandler
 
@@ -1118,12 +1139,21 @@ class Stasis :
         #end if
         fail = None
         try :
+            request = urllib.request.Request \
+              (
+                url,
+                method = method.methodstr,
+                headers =
+                    {
+                        "Authorization" : self.passwd.make_basic_auth(),
+                    }
+              )
             if ASYNC :
-                with await call_async(self.opener.open, (urllib.request.Request(url, method = method.methodstr),)) as req :
+                with await call_async(self.opener.open, (request,)) as req :
                     resp = await call_async(req.read, ())
                 #end with
             else :
-                with self.opener.open(urllib.request.Request(url, method = method.methodstr)) as req :
+                with self.opener.open(request) as req :
                     resp = req.read()
                 #end with
             #end if
@@ -1180,13 +1210,7 @@ class Stasis :
                         [
                             (
                                 "Authorization",
-                                    "Basic "
-                                +
-                                    base64.b64encode
-                                      (
-                                        ("%s:%s" % (parent.passwd.username, parent.passwd.password))
-                                            .encode()
-                                      ).decode(),
+                                parent.passwd.make_basic_auth(),
                             ),
                         ]
                   )

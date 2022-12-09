@@ -22,6 +22,7 @@
 import sys
 import os
 import enum
+import errno
 import socket
 import base64
 import urllib.parse
@@ -390,7 +391,17 @@ class Gateway :
         self.to_asterisk = to_asterisk
         self.audio_in = None
         if with_audio_in :
-            self.audio_in = os.fdopen(3, "r")
+            try :
+                self.audio_in = os.fdopen(3, "rb")
+            except OSError as err :
+                if err.errno != errno.EBADF :
+                    raise
+                #end if
+                self.audio_in = None
+            #end if
+            if self.audio_in == None :
+                raise RuntimeError("no audio-in fd available")
+            #end if
         #end if
         self.agi_vars = {}
         while True :

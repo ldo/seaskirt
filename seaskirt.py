@@ -375,7 +375,26 @@ def quote_url(s) :
 #-
 
 class Manager :
-    "simple management of an Asterisk Manager API connection."
+    "simple management of an Asterisk Manager API connection. When setting" \
+    " up the connection, you specify whether you want to receive asynchronous" \
+    " (unsolicited) events. It is a good idea, where possible, to turn this on" \
+    " only on a connection which is not being used to send action requests to" \
+    " Asterisk; if you need both, open a separate connection for action requests" \
+    " if you can, with unsolicited event reception turned off.\n" \
+    "\n" \
+    "However, there is a difficulty with this if you want to use the async" \
+    " mode of the Originate action. Because in this mode the corresponding" \
+    " OriginateResponse is sent as an event, but only on the connection" \
+    " which initiated the call, and only if unsolicited event reception is" \
+    " enabled on that connection.\n" \
+    "\n" \
+    "So, in this situation, you need to be able to pair up the response event" \
+    " with its corresponding action request, ignoring other events which might" \
+    " appear in the meantime. To achieve this, specify an iterator that returns some" \
+    " endless sequence of non-repeating strings as the id_gen arg; this will ensure" \
+    " that every request goes out with a unique ActionID value, which will be returned" \
+    " in the corresponding response. You can use the naturals() function for this" \
+    " purpose."
 
     NL = "\015\012" # protocol line delimiter
 

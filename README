@@ -23,9 +23,11 @@ unsolicited events. If the return from the call indicates something is waiting
 to be read, you can call the `get_response()` method to (synchronously)
 obtain the response.
 
-I will likely include a more asynchronous way of working, including
-more direct `asyncio` support at some point, thought I haven’t quite
-decided what form this should take.
+The main classes are available in both synchronous (blocking)
+and asynchronous (asyncio-based) variants. Both variants are
+generated from a common code base via an experimental technique
+involving AST transformations. One drawback of this is that
+tracebacks report incorrect source lines.
 
 I haven’t done much documentation for this (besides what’s in the source
 module), but examples of its use can be found at
@@ -206,4 +208,4 @@ they work with `asyncio`.
 | [`asyncari`](https://github.com/M-o-a-T/asyncari/) | no | no | yes | via [`anyio`](https://github.com/agronholm/anyio) |
 
 Lawrence D'Oliveiro <ldo@geek-central.gen.nz>
-2022 December 3
+2022 December 9

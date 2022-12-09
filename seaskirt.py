@@ -390,6 +390,7 @@ class Manager :
         self.debug = debug
         self.the_conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.id_gen = id_gen
+        self.last_request_id = None
         if timeout != None :
             self.the_conn.settimeout(timeout)
         #end if
@@ -424,11 +425,15 @@ class Manager :
             self
     #end __new__
 
-    def close(self) :
+    async def close(self) :
         "closes the Asterisk Manager connection. Calling this on an" \
         " already-closed connection is harmless."
         if self.the_conn != None :
-            self.the_conn.close()
+            if ASYNC :
+                await call_async(self.the_conn.close, ())
+            else :
+                self.the_conn.close()
+            #end if
             self.the_conn = None
         #end if
     #end close
@@ -444,7 +449,8 @@ class Manager :
         " any subsequent response with get_response."
         to_send = "Action: " + action + self.NL
         if self.id_gen != None :
-            to_send += "ActionID: %d%s" % (next(self.id_gen), self.NL)
+            self.last_request_id = str(next(self.id_gen))
+            to_send += "ActionID: %s%s" % (self.last_request_id, self.NL)
         #end if
         for parm in parms.keys() :
             to_send += parm + ": " + self.sanitize(parms[parm]) + self.NL
@@ -539,24 +545,26 @@ class Manager :
                     "next_response: \"%s\"\n" % repr(next_response)
                   )
             #end if
-            if first_response :
-                # check for success/failure
-                if next_response.get("Response") not in ("Success", "Goodbye") :
-                    raise RuntimeError \
-                      (
-                        "%s failed -- %s" % (action, next_response.get("Message", "?"))
-                      )
+            if self.last_request_id == None or next_response.get("ActionID") == self.last_request_id :
+                if first_response :
+                    # check for success/failure
+                    if next_response.get("Response") not in ("Success", "Goodbye") :
+                        raise RuntimeError \
+                          (
+                            "%s failed -- %s" % (action, next_response.get("Message", "?"))
+                          )
+                    #end if
+                    first_response = False
+                    if next_response.get("EventList") == "start" :
+                        multi_response = True
+                    #end if
                 #end if
-                first_response = False
-                if next_response.get("EventList") == "start" :
-                    multi_response = True
-                #end if
+                response.append(next_response)
+                if not multi_response :
+                    break
+                if next_response.get("EventList") == "Complete" :
+                    break
             #end if
-            response.append(next_response)
-            if not multi_response :
-                break
-            if next_response.get("EventList") == "Complete" :
-                break
         #end while
         if not multi_response :
             assert len(response) == 1

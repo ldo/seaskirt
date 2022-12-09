@@ -1134,6 +1134,7 @@ class Stasis :
             #end if
             self.fileno = self.sock.fileno
             self.EOF = self.closing = False
+            self.partial = ""
             req = self.ws.send \
               (
                 wsevents.Request
@@ -1171,28 +1172,26 @@ class Stasis :
             "Call this when your event loop gets a notification that input is" \
             " pending on the WebSocket connection. It will yield any received" \
             " events."
-            while True :
-                if self.EOF :
-                    break
-                # Note: looks like wsproto will return a TextMessage event
-                # even if the message has not been fully received. So I make
-                # sure to read and process everything pending before
-                # asking it for available events. This can only be a partial
-                # workaround, though.
-                try :
-                    data = self.sock.recv(IOBUFSIZE, socket.MSG_DONTWAIT)
-                except BlockingIOError :
-                    data = None
-                #end try
-                if data == None :
-                    break
-                self.ws.receive_data(data)
-                if len(data) == 0 :
+            try :
+                data = self.sock.recv(IOBUFSIZE, socket.MSG_DONTWAIT)
+            except BlockingIOError :
+                data = None
+            #end try
+            if data != None :
+                if len(data) != 0 :
+                    self.ws.receive_data(data)
+                else :
                     self.EOF = True
                 #end if
-            #end while
-            loop = asyncio.get_running_loop()
-            for event in self.ws.events() :
+            #end if
+            if ASYNC :
+                loop = asyncio.get_running_loop()
+            #end if
+            events = iter(self.ws.events())
+            while True :
+                event = next(events, None)
+                if event == None :
+                    break
                 if isinstance(event, wsevents.AcceptConnection) :
                     if self.debug :
                         sys.stderr.write("connection accepted\n")
@@ -1218,19 +1217,20 @@ class Stasis :
                         self.sock.sendall(self.ws.send(event.response()))
                     #end if
                 elif isinstance(event, wsevents.TextMessage) :
-                    if self.debug :
-                        sys.stderr.write("received TextMessage: %s\n" % repr(event.data))
+                    self.partial += event.data
+                    if event.message_finished :
+                        if self.partial != "" :
+                            result = json.loads(self.partial)
+                            self.partial = ""
+                        else :
+                            result = None
+                        #end if
+                        yield result
                     #end if
-                    if event.data != "" :
-                        result = json.loads(event.data)
-                    else :
-                        result = None
-                    #end if
-                    yield result
                 else :
                     raise RuntimeError("unexpected WebSocket event %s -- %s" % (type(event).__name__, repr(event)))
                 #end if
-            #end for
+            #end while
         #end process
 
         async def close(self) :

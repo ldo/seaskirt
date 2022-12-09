@@ -42,7 +42,7 @@ import wsproto.events as wsevents
 # Code generation
 #
 # This mechanism allows for synchronous and asynchronous versions of
-# APIs to share common code. Within methods that come in both forms,
+# classes to share common code. Within methods that come in both forms,
 # they will be declared “async def”, and within them you will see
 # conditionals of the form
 #
@@ -56,6 +56,11 @@ import wsproto.events as wsevents
 # getting rid of the synchronous alternatives to produce the
 # asynchronous form, and the other getting rid of the asynchronous
 # alternatives to produce the synchronous form.
+#
+# However, note that __init__ is not allowed to be async def
+# (must return None, not a coroutine), so if you want to do
+# asynchronous object creation, you need to do object construction
+# in a __new__ method instead.
 #-
 
 class ConditionalExpander(ast.NodeTransformer) :
@@ -379,9 +384,6 @@ class Manager :
         # sanitizes the value of parm to avoid misbehaviour with Manager API syntax.
         return str(parm).replace("\n", "")
     #end sanitize
-
-    # __init__ is not allowed to be async def (must return None, not a coroutine),
-    # so I create object in __new__ instead.
 
     async def __new__(celf, host = "127.0.0.1", port = 5038, *, id_gen = None, timeout = None, debug = False) :
         "opens connection and receives initial Hello message" \

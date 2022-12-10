@@ -404,9 +404,9 @@ class Manager :
         return str(parm).replace("\n", "")
     #end sanitize
 
-    async def __new__(celf, host = "127.0.0.1", port = 5038, *, id_gen = None, timeout = None, debug = False) :
-        "opens connection and receives initial Hello message" \
-        " from Asterisk."
+    async def __new__(celf, host = "127.0.0.1", port = 5038, *, username, password, want_events = False, id_gen = None, timeout = None, debug = False) :
+        "opens connection, receives initial Hello message from Asterisk, and does" \
+        " initial mandatory authentication handshake."
         self = super().__new__(celf)
         self.debug = debug
         self.the_conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -445,6 +445,22 @@ class Manager :
                 break
         #end while
         self.hello, self.buff = self.buff.split(self.NL, 1)
+        parms = \
+            {
+                "Username" : username,
+                "Secret" : password,
+            }
+        if not want_events :
+            parms["Events"] = "off"
+        #end if
+        if ASYNC :
+            response = await self.transact(action = "Login", parms = parms)
+        else :
+            response = self.transact(action = "Login", parms = parms)
+        #end if
+        if response["Response"] != "Success" :
+            raise RuntimeError("authentication failed")
+        #end if
         return \
             self
     #end __new__
@@ -596,29 +612,6 @@ class Manager :
         #end if
         return response
     #end transact
-
-    async def authenticate(self, username, password, want_events = False) :
-        "logs in with a username and password. This is mandatory" \
-        " after opening the connection, before trying any other" \
-        " commands. want_events indicates whether you want to receive" \
-        " unsolicited event notifications on this connection."
-        parms = \
-            {
-                "Username" : username,
-                "Secret" : password,
-            }
-        if not want_events :
-            parms["Events"] = "off"
-        #end if
-        if ASYNC :
-            response = await self.transact(action = "Login", parms = parms)
-        else :
-            response = self.transact(action = "Login", parms = parms)
-        #end if
-        if response["Response"] != "Success" :
-            raise RuntimeError("authentication failed")
-        #end if
-    #end authenticate
 
     async def do_command(self, command) :
         "does a Command request and returns the response text."

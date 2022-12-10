@@ -1,6 +1,7 @@
 `seaskirt` is yet another Python wrapper for communicating with the
 [Asterisk](https://wiki.asterisk.org/wiki/display/AST/Home)
-open-source telephony engine.
+open-source telephony engine. Besides Python 3.7 or later, you will
+also need the python3-wsproto package installed.
 
 I first put this module together about a decade and a half ago, when I
 was first learning about Asterisk and Python. Then more recently I
@@ -14,14 +15,6 @@ example, if you want to run an event listener, I don’t provide any
 elaborate pattern-matching mechanism for you to register which events
 matter to you: your listener gets everything, and it is up to you to
 decide which ones to look at and which ones to ignore.
-
-**Event-loop support:** This is pretty rudimentary at the moment.
-All communication transactions are currently required to be synchronous.
-However, the `Manager` object does implement a `fileno()` method,
-allowing it to be passed to `select`/`poll` calls to check for incoming
-unsolicited events. If the return from the call indicates something is waiting
-to be read, you can call the `get_response()` method to (synchronously)
-obtain the response.
 
 The main classes are available in both synchronous (blocking)
 and asynchronous (asyncio-based) variants. Both variants are
@@ -208,4 +201,4 @@ they work with `asyncio`.
 | [`asyncari`](https://github.com/M-o-a-T/asyncari/) | no | no | yes | via [`anyio`](https://github.com/agronholm/anyio) |
 
 Lawrence D'Oliveiro <ldo@geek-central.gen.nz>
-2022 December 9
+2022 December 10

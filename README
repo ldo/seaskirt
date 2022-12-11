@@ -20,7 +20,14 @@ The main classes are available in both synchronous (blocking)
 and asynchronous (asyncio-based) variants. Both variants are
 generated from a common code base via an experimental technique
 involving AST transformations. One drawback of this is that
-tracebacks report incorrect source lines.
+tracebacks report incorrect source lines. These main classes are:
+
+  * `Manager`/`ManagerAsync`, for handling AMI connections
+  * `Gateway`/`GatewayAsync`, for handling AGI/EAGI connections. Each
+    class also provides a `listener()` classmethod, for accepting
+    connections via FastAGI.
+  * `Stasis`/`StasisAsync`, for handling ARI connections (including
+    listening for events via WebSockets).
 
 I haven’t done much documentation for this (besides what’s in the source
 module), but examples of its use can be found at
@@ -201,4 +208,4 @@ they work with `asyncio`.
 | [`asyncari`](https://github.com/M-o-a-T/asyncari/) | no | no | yes | via [`anyio`](https://github.com/agronholm/anyio) |
 
 Lawrence D'Oliveiro <ldo@geek-central.gen.nz>
-2022 December 10
+2022 December 11

@@ -28,6 +28,7 @@ tracebacks report incorrect source lines. These main classes are:
     connections via FastAGI.
   * `Stasis`/`StasisAsync`, for handling ARI connections (including
     listening for events via WebSockets).
+  * `Console`/`ConsoleAsync`, for connecting to the Asterisk console.
 
 I haven’t done much documentation for this (besides what’s in the source
 module), but examples of its use can be found at
@@ -66,8 +67,11 @@ the output from the “`agi show commands`” console command. Meanwhile,
 execution of the dialplan context is suspended until the AGI
 connection terminates, or the call is hung up.
 
+In addition to these, there was the interface used by the
+Asterisk console itself, for performing administrative functions.
+
 Originally, there was essentially no overlap in the functionality
-offered by these two separate communication interfaces. AMI let you
+offered by those first two separate communication interfaces. AMI let you
 perform operations affecting Asterisk as a whole, and even initiate
 calls and do some manipulation of them. But you could not, for
 example, listen for DTMF tones on a channel; that was the province of

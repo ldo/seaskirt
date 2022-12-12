@@ -34,6 +34,7 @@ import urllib.request
 import json
 import inspect
 import ast
+import select
 import asyncio
 import wsproto
 import wsproto.events as wsevents
@@ -1340,6 +1341,237 @@ class Stasis :
 #end Stasis
 
 def_sync_async_classes(Stasis, "Stasis", "StasisAsync")
+
+#+
+# Asterisk console interface
+#
+# Note that the socket for this is normally only accessible to
+# the root user.
+#
+# This is not actually documented as a public API. What I know
+# about it I figured out from looking at the Asterisk source code,
+# particularly main/asterisk.c. That file includes code for handling
+# both the client and server ends of the connection. In that file, the
+# client socket end is held in the variable “ast_consock”, and the
+# server ends are managed in the “consoles” array, with elements of
+# type “struct console”.
+#-
+
+CONSOLE_SOCKET_PATH = "/var/run/asterisk/asterisk.ctl"
+  # default location, anyway
+
+class Console :
+    "opens a connection to the Asterisk console on the local machine."
+
+    async def __new__(celf, socket_path = None, verbosity = 100) :
+        self = super().__new__(celf)
+        if socket_path == None :
+            socket_path = CONSOLE_SOCKET_PATH
+              # Why default dynamically, rather than statically?
+              # So that caller can change value of global before
+              # instantiating this class, if they wish.
+        #end if
+        conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        if ASYNC :
+            await call_async(conn.connect, (socket_path,))
+        else :
+            conn.connect(socket_path)
+        #end if
+        self.conn = conn
+        self.to_send = b""
+        self.received = b""
+        self.EOF = False
+        if verbosity != None :
+            # without these commands, you will not see any
+            # console messages returned.
+            for cmd in \
+                (
+                    "core set verbose atleast %d silent" % verbosity,
+                    "logger mute silent",
+                ) \
+            :
+                self.send(cmd)
+            #end for
+        #end if
+        return \
+            self
+    #end __new__
+
+    def send(self, line) :
+        "queues a command for transmission to the Asterisk console."
+        b_line = line.encode()
+        if 0 in b_line :
+            raise ValueError("line contains embedded null")
+        #end if
+        self.to_send += b_line + b"\x00"
+        return \
+            self
+    #end send
+
+    def process(self, recv = True, send = True) :
+        "receives any pending data from Asterisk (if recv) and also" \
+        " sends it any pending commands from us (if send). Invoke this" \
+        " from your event loop when monitoring of the conn socket indicates" \
+        " that something is ready to be received or sent."
+        received_something = sent_something = False
+        if recv :
+            while not self.EOF :
+                try :
+                    data = self.conn.recv(IOBUFSIZE, socket.MSG_DONTWAIT)
+                except BlockingIOError :
+                    data = None
+                #end try
+                if data == None :
+                    break
+                received_something = True # even if it’s only the EOF indication
+                if len(data) != 0 :
+                    self.received += data
+                else :
+                    self.EOF = True
+                #end if
+            #end while
+        #end if
+        if send :
+            while True :
+                if len(self.to_send) == 0 :
+                    break
+                try :
+                    sent = self.conn.send(self.to_send, socket.MSG_DONTWAIT)
+                except BlockingIOError :
+                    sent = 0
+                #end try
+                if sent == 0 :
+                    break
+                sent_something = True
+                self.to_send = self.to_send[sent:]
+            #end while
+        #end if
+        return \
+            (received_something, sent_something)
+    #end process
+
+    def get_response(self) :
+        "returns any (partial) response line received so far, together with its" \
+        " verbosity level. A complete line will end with a newline character," \
+        " while a partial one will end with a null (not included). If neither" \
+        " delimiter has been seen yet, then the empty string is returned."
+        to_decode = self.received
+        prefix = b""
+        verbosity = 0
+        if len(to_decode) != 0 and to_decode[0] >= 128 :
+            prefix = to_decode[:1]
+            verbosity = 256 - prefix[0] - 1
+            to_decode = to_decode[1:]
+        #end if
+        line_end = to_decode.find(0)
+        skip = 0
+        if line_end >= 0 :
+            # drop null from self.received without including it in
+            # decoded result
+            skip = 1
+        else :
+            line_end = to_decode.find(10)
+            if line_end >= 0 :
+                line_end += 1 # include newline in result
+            #end if
+        #end if
+        if line_end >= 0 :
+            to_decode = to_decode[:line_end]
+            result = to_decode.decode()
+            self.received = self.received[len(prefix) + len(to_decode) + skip:]
+              # drop decoded data
+        else :
+            result = ""
+        #end if
+        return \
+            (verbosity, result)
+    #end get_response
+
+    async def flush(self, timeout = None) :
+        "ensures that any pending commands have been sent, or the given timeout" \
+        " (if any) has elapsed. There may be returned responses available to be" \
+        " retrieved after this."
+        while True :
+            if ASYNC :
+                loop = asyncio.get_running_loop()
+                ready = loop.create_future()
+                flags = 0
+
+                def fd_ready(writing) :
+                    nonlocal flags
+                    flags |= (select.POLLIN, select.POLLOUT)[writing]
+                    if not ready.done() :
+                        ready.set_result(False)
+                    #end if
+                #end fd_ready
+
+                def fd_timeout() :
+                    if not ready.done() :
+                        ready.set_result(True)
+                    #end if
+                #end fd_timeout
+
+                timeout_task = None
+                loop.add_reader(self.conn, fd_ready, False)
+                if len(self.to_send) != 0 :
+                    loop.add_writer(self.conn, fd_ready, True)
+                #end if
+                if timeout != None :
+                    timeout_task = loop.call_later(timeout, fd_timeout)
+                #end if
+                timed_out = await ready
+                loop.remove_reader(self.conn)
+                if len(self.to_send) != 0 :
+                    loop.remove_writer(self.conn)
+                #end if
+                if timeout_task != None :
+                    timeout_task.cancel()
+                #end if
+                if timed_out :
+                    break
+                ready = flags
+            else :
+                poll = select.poll()
+                poll.register \
+                  (
+                    self.conn,
+                    (0, select.POLLOUT)[len(self.to_send) != 0] | select.POLLIN
+                  )
+                ready = poll.poll \
+                  (
+                    (lambda : None, lambda : round(timeout * 1000))
+                        [timeout != None]()
+                  )
+                if len(ready) == 0 :
+                    break
+                ready = ready[0]
+                assert ready[0] == self.conn.fileno()
+                ready = ready[1]
+            #end if
+            recv = select.POLLIN & ready != 0
+            send = select.POLLOUT & ready != 0
+            done = self.process(recv = recv, send = send)
+            if len(self.to_send) == 0 :
+                break
+        #end while
+        return \
+            self
+    #end flush
+
+    async def close(self) :
+        if self.conn != None :
+            if ASYNC :
+                await call_async(self.conn.close, ())
+            else :
+                self.conn.close()
+            #end if
+            self.conn = None
+        #end if
+    #end close
+
+#end Console
+
+def_sync_async_classes(Console, "Console", "ConsoleAsync")
 
 #+
 # Tidy up

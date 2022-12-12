@@ -431,28 +431,28 @@ class Manager :
         " initial mandatory authentication handshake."
         self = super().__new__(celf)
         self.debug = debug
-        self.the_conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         if id_gen != None and not hasattr(id_gen, "__next__") :
             raise TypeError("id_gen is not an iterator")
         #end if
         self.id_gen = id_gen
         self.last_request_id = None
         if timeout != None :
-            self.the_conn.settimeout(timeout)
+            self.conn.settimeout(timeout)
         #end if
         if ASYNC :
-            await call_async(self.the_conn.connect, ((host, port),))
-            self.the_conn.setblocking(False)
+            await call_async(self.conn.connect, ((host, port),))
+            self.conn.setblocking(False)
         else :
-            self.the_conn.connect((host, port))
+            self.conn.connect((host, port))
         #end if
         self.buff = ""
         self.EOF = False
         while True : # get initial hello msg
             if ASYNC :
-                more = await asyncio.get_running_loop().sock_recv(self.the_conn, SMALL_IOBUFSIZE)
+                more = await asyncio.get_running_loop().sock_recv(self.conn, SMALL_IOBUFSIZE)
             else :
-                more = self.the_conn.recv(SMALL_IOBUFSIZE)
+                more = self.conn.recv(SMALL_IOBUFSIZE)
             #end if
             if len(more) == 0 :
                 self.EOF = True
@@ -490,20 +490,20 @@ class Manager :
     async def close(self) :
         "closes the Asterisk Manager connection. Calling this on an" \
         " already-closed connection is harmless."
-        if self.the_conn != None :
+        if self.conn != None :
             if ASYNC :
-                await call_async(self.the_conn.close, ())
+                await call_async(self.conn.close, ())
             else :
-                self.the_conn.close()
+                self.conn.close()
             #end if
-            self.the_conn = None
+            self.conn = None
         #end if
     #end close
 
     def fileno(self) :
         "allows use in a select, for example to check if" \
         " any unsolicited events are available to be read."
-        return self.the_conn.fileno()
+        return self.conn.fileno()
     #end fileno
 
     async def send_request(self, action, parms, vars = None) :
@@ -528,9 +528,9 @@ class Manager :
             sys.stderr.write(to_send)
         #end if
         if ASYNC :
-            await asyncio.get_running_loop().sock_sendall(self.the_conn, to_send.encode())
+            await asyncio.get_running_loop().sock_sendall(self.conn, to_send.encode())
         else :
-            self.the_conn.sendall(to_send.encode())
+            self.conn.sendall(to_send.encode())
         #end if
     #end send_request
 
@@ -556,9 +556,9 @@ class Manager :
                     sys.stderr.write("Getting more\n")
                 #end if
                 if ASYNC :
-                    more = await asyncio.get_running_loop().sock_recv(self.the_conn, IOBUFSIZE)
+                    more = await asyncio.get_running_loop().sock_recv(self.conn, IOBUFSIZE)
                 else :
-                    more = self.the_conn.recv(IOBUFSIZE)
+                    more = self.conn.recv(IOBUFSIZE)
                 #end if
                 if len(more) == 0 :
                     self.EOF = True
@@ -653,9 +653,9 @@ class Manager :
                     sys.stderr.write("Getting more\n")
                 #end if
                 if ASYNC :
-                    more = await asyncio.get_running_loop().sock_recv(self.the_conn, IOBUFSIZE)
+                    more = await asyncio.get_running_loop().sock_recv(self.conn, IOBUFSIZE)
                 else :
-                    more = self.the_conn.recv(IOBUFSIZE)
+                    more = self.conn.recv(IOBUFSIZE)
                 #end if
                 if len(more) == 0 :
                     self.EOF = True

@@ -39,23 +39,45 @@ import wsproto
 import wsproto.events as wsevents
 
 #+
-# Code generation
+# Macro preprocessor
 #
 # This mechanism allows for synchronous and asynchronous versions of
-# classes to share common code. Within methods that come in both forms,
-# they will be declared “async def”, and within them you will see
-# conditionals of the form
+# classes to share common code. Methods that come in both forms will
+# look something like
 #
-#     if ASYNC :
-#         ... asynchronous form of execution ..
-#     else :
-#         ... synchronous form of execution ..
-#     #end if
+#     async def «method» ...
+#         ...
+#         if ASYNC :
+#             «asynchronous variant»
+#         else :
+#             «synchronous variant»
+#         #end if
+#         ...
+#     #end «method»
 #
-# The code for such functions is processed into two variants, one
-# getting rid of the synchronous alternatives to produce the
-# asynchronous form, and the other getting rid of the asynchronous
-# alternatives to produce the synchronous form.
+# where “ASYNC” is an undefined variable, used as a special condition
+# marker at every point where the two variants diverge.
+#
+# The abstract syntax tree for this code will be processed into two
+# variants, that (if they were decompiled to source form) would look
+# like
+#
+#     def «method» ...
+#         ...
+#         «synchronous variant»
+#         ...
+#     #end «method»
+#
+#     async def «method» ...
+#         ...
+#         «asynchronous variant»
+#         ...
+#     #end «method»
+#
+# Notice that all references to “ASYNC” disappear, leaving the
+# synchronous version executing unconditionally synchronous code,
+# and the asynchronous version unconditionally using the asynchronous
+# variants of that code.
 #
 # However, note that __init__ is not allowed to be async def
 # (must return None, not a coroutine), so if you want to do
@@ -1320,7 +1342,7 @@ class Stasis :
 def_sync_async_classes(Stasis, "Stasis", "StasisAsync")
 
 #+
-# Overall
+# Tidy up
 #-
 
 del ConditionalExpander, def_sync_async_classes

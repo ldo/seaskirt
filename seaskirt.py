@@ -461,7 +461,7 @@ class Manager :
             #end if
             more = more.decode()
             if self.debug :
-                sys.stderr.write("init got more: %s\n" % repr(more))
+                sys.stderr.write("Manager init got more: %s\n" % repr(more))
             #end if
             self.buff += more
             if self.buff.find(self.NL) >= 0 :
@@ -526,7 +526,7 @@ class Manager :
         #end if
         to_send += self.NL # marks end of request
         if self.debug :
-            sys.stderr.write(to_send)
+            sys.stderr.write("Manager sending: %s" % to_send)
         #end if
         if ASYNC :
             await asyncio.get_running_loop().sock_sendall(self.conn, to_send.encode())
@@ -554,7 +554,7 @@ class Manager :
                 #end if
             else :
                 if self.debug :
-                    sys.stderr.write("Getting more\n")
+                    sys.stderr.write("Manager getting more\n")
                 #end if
                 if ASYNC :
                     more = await asyncio.get_running_loop().sock_recv(self.conn, IOBUFSIZE)
@@ -569,7 +569,7 @@ class Manager :
                 if self.debug :
                     sys.stderr.write \
                       (
-                        "Got (%u): \"%s\"\n" % (len(self.buff), self.buff)
+                        "Manager got (%u): \"%s\"\n" % (len(self.buff), self.buff)
                       )
                 #end if
             #end if
@@ -605,7 +605,7 @@ class Manager :
             if self.debug :
                 sys.stderr.write \
                   (
-                    "next_response: \"%s\"\n" % repr(next_response)
+                    "Manager next_response: \"%s\"\n" % repr(next_response)
                   )
             #end if
             if self.last_request_id == None or next_response.get("ActionID") == self.last_request_id :
@@ -651,7 +651,7 @@ class Manager :
                 if self.buff.find(self.NL) >= 0 or self.EOF :
                     break
                 if self.debug :
-                    sys.stderr.write("Getting more\n")
+                    sys.stderr.write("Manager command getting more\n")
                 #end if
                 if ASYNC :
                     more = await asyncio.get_running_loop().sock_recv(self.conn, IOBUFSIZE)
@@ -666,7 +666,7 @@ class Manager :
                 if self.debug :
                     sys.stderr.write \
                       (
-                        "Got (%u): \"%s\"\n" % (len(self.buff), self.buff)
+                        "Manager command got (%u): \"%s\"\n" % (len(self.buff), self.buff)
                       )
                 #end if
             #end while

@@ -393,6 +393,90 @@ def quote_url(s) :
         urllib.parse.quote(s, safe = "")
 #end quote_url
 
+def sock_wait(sock, recv, send, timeout = None) :
+    "waits until the specified socket has something to be received or sent," \
+    " or the timeout (if specified) elapses."
+    if not (recv or send) :
+        raise RuntimeError("need to wait for either receive or send or both")
+    #end if
+    poll = select.poll()
+    poll.register \
+      (
+        sock,
+        (0, select.POLLOUT)[send] | (0, select.POLLIN)[recv]
+      )
+    ready = poll.poll \
+      (
+        (lambda : None, lambda : round(timeout * 1000))
+            [timeout != None]()
+      )
+    if len(ready) != 0 :
+        ready = ready[0]
+        assert ready[0] == sock.fileno()
+        flags = ready[1]
+        receiving = flags & select.POLLIN != 0
+        sending = flags & select.POLLOUT != 0
+    else :
+        receiving = sending = False
+    #end if
+    return \
+        (receiving, sending)
+#end sock_wait
+
+async def sock_wait_async(sock, recv, send, timeout = None) :
+    "waits until the specified socket has something to be received or sent," \
+    " or the timeout (if specified) elapses."
+    if not (recv or send) :
+        raise RuntimeError("need to wait for either receive or send or both")
+    #end if
+    loop = asyncio.get_running_loop()
+    ready = loop.create_future()
+    flags = 0
+
+    def fd_ready(writing) :
+        nonlocal flags
+        flags |= (select.POLLIN, select.POLLOUT)[writing]
+        if not ready.done() :
+            ready.set_result(False)
+        #end if
+    #end fd_ready
+
+    def fd_timeout() :
+        if not ready.done() :
+            ready.set_result(True)
+        #end if
+    #end fd_timeout
+
+    timeout_task = None
+    if recv :
+        loop.add_reader(sock, fd_ready, False)
+    #end if
+    if send :
+        loop.add_writer(sock, fd_ready, True)
+    #end if
+    if timeout != None :
+        timeout_task = loop.call_later(timeout, fd_timeout)
+    #end if
+    timed_out = await ready
+    if recv :
+        loop.remove_reader(sock)
+    #end if
+    if send :
+        loop.remove_writer(sock)
+    #end if
+    if timeout_task != None :
+        timeout_task.cancel()
+    #end if
+    if timed_out :
+        receiving = sending = False
+    else :
+        receiving = select.POLLIN & flags != 0
+        sending = select.POLLOUT & flags != 0
+    #end if
+    return \
+        (receiving, sending)
+#end sock_wait_async
+
 #+
 # Asterisk Manager Interface
 #-
@@ -557,10 +641,12 @@ class Manager :
                     sys.stderr.write("Manager getting more\n")
                 #end if
                 if ASYNC :
-                    more = await asyncio.get_running_loop().sock_recv(self.conn, IOBUFSIZE)
+                    recv = (await sock_wait_async(self.conn, True, False))[0]
                 else :
-                    more = self.conn.recv(IOBUFSIZE)
+                    recv = sock_wait(self.conn, True, False)[0]
                 #end if
+                assert recv
+                more = self.conn.recv(IOBUFSIZE)
                 if len(more) == 0 :
                     self.EOF = True
                     break
@@ -1493,63 +1579,22 @@ class Console :
         " retrieved after this."
         while True :
             if ASYNC :
-                loop = asyncio.get_running_loop()
-                ready = loop.create_future()
-                flags = 0
-
-                def fd_ready(writing) :
-                    nonlocal flags
-                    flags |= (select.POLLIN, select.POLLOUT)[writing]
-                    if not ready.done() :
-                        ready.set_result(False)
-                    #end if
-                #end fd_ready
-
-                def fd_timeout() :
-                    if not ready.done() :
-                        ready.set_result(True)
-                    #end if
-                #end fd_timeout
-
-                timeout_task = None
-                loop.add_reader(self.conn, fd_ready, False)
-                if len(self.to_send) != 0 :
-                    loop.add_writer(self.conn, fd_ready, True)
-                #end if
-                if timeout != None :
-                    timeout_task = loop.call_later(timeout, fd_timeout)
-                #end if
-                timed_out = await ready
-                loop.remove_reader(self.conn)
-                if len(self.to_send) != 0 :
-                    loop.remove_writer(self.conn)
-                #end if
-                if timeout_task != None :
-                    timeout_task.cancel()
-                #end if
-                if timed_out :
-                    break
-                ready = flags
+                recv, send = await sock_wait_async \
+                  (
+                    sock = self.conn,
+                    recv = True,
+                    send = len(self.to_send) != 0,
+                    timeout = timeout
+                  )
             else :
-                poll = select.poll()
-                poll.register \
+                recv, send = sock_wait \
                   (
-                    self.conn,
-                    (0, select.POLLOUT)[len(self.to_send) != 0] | select.POLLIN
+                    sock = self.conn,
+                    recv = True,
+                    send = len(self.to_send) != 0,
+                    timeout = timeout
                   )
-                ready = poll.poll \
-                  (
-                    (lambda : None, lambda : round(timeout * 1000))
-                        [timeout != None]()
-                  )
-                if len(ready) == 0 :
-                    break
-                ready = ready[0]
-                assert ready[0] == self.conn.fileno()
-                ready = ready[1]
             #end if
-            recv = select.POLLIN & ready != 0
-            send = select.POLLOUT & ready != 0
             done = self.process(recv = recv, send = send)
             if len(self.to_send) == 0 :
                 break

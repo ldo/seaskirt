@@ -1595,6 +1595,9 @@ class Console :
                     timeout = timeout
                   )
             #end if
+            if not (recv or send) :
+                # timeout
+                break
             done = self.process(recv = recv, send = send)
             if len(self.to_send) == 0 :
                 break

@@ -1,10 +1,12 @@
 `seaskirt` is yet another Python wrapper for communicating with the
 [Asterisk](https://wiki.asterisk.org/wiki/display/AST/Home)
 open-source telephony engine. Besides Python 3.7 or later, you will
-also need the python3-wsproto package installed.
+also need the
+[`python3-wsproto`](https://packages.debian.org/bullseye/python3-wsproto)
+package installed.
 
 I first put this module together about a decade and a half ago, when I
-was first learning about Asterisk and Python. Then more recently I
+was just learning about Asterisk and Python. Then more recently I
 dusted it off, and updated it for Python 3 and more recent Asterisk
 versions (specifically, tested with Asterisk 16 and Asterisk 20),
 adding very basic support for Asterisk’s newer ARI protocol.
@@ -67,7 +69,7 @@ the output from the “`agi show commands`” console command. Meanwhile,
 execution of the dialplan context is suspended until the AGI
 connection terminates, or the call is hung up.
 
-In addition to these, there was the interface used by the
+In addition to these, there is the interface used by the
 Asterisk console itself, for performing administrative functions.
 
 Originally, there was essentially no overlap in the functionality
@@ -187,6 +189,27 @@ fact, ARI _enforces_ this separation, since the main REST protocol is only for
 requests/responses, while event listening has to be done by setting up a
 dedicated WebSocket connection.
 
+Just to add to the confusion, it is possible in AMI to initiate the
+[`Originate`](https://wiki.asterisk.org/wiki/display/AST/ManagerAction_Originate)
+action in “Async” mode, where it returns immediately without actually
+waiting for the number to be dialled. Instead, you will be notified
+via an
+[`OriginateResponse`](https://wiki.asterisk.org/wiki/display/AST/Asterisk+16+ManagerEvent_OriginateResponse)
+event when the number is dialled.
+
+But here’s the kicker: this event is not sent on _every_ event-listener
+connection, but only on the one that initiated the `Originate` action.
+And if you are not listening for unsolicited events, then you don’t get
+this event either!
+
+Luckily, there is a mechanism to help mitigate this: you can associate
+an `ActionID` parameter with every Manager action, with a unique value
+that you generate. And responses to that action will be given the
+same `ActionID` value. This lets you filter out responses that do not
+match that `ActionID` value (or which do not have an ActionID parameter).
+
+At least things are a bit simpler with ARI.
+
 
 The State Of Python Wrappers
 ============================
@@ -212,4 +235,4 @@ they work with `asyncio`.
 | [`asyncari`](https://github.com/M-o-a-T/asyncari/) | no | no | yes | via [`anyio`](https://github.com/agronholm/anyio) |
 
 Lawrence D'Oliveiro <ldo@geek-central.gen.nz>
-2022 December 11
+2022 December 15

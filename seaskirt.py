@@ -1208,8 +1208,8 @@ class Stasis :
         if not isinstance(method, RESTMETHOD) :
             raise TypeError("method must be an instance of RESTMETHOD")
         #end if
-        if path != "" and not path.startswith("/") :
-            raise ValueError("nonempty path must start with “/”")
+        if not path.startswith("/") :
+            raise ValueError("path must start with “/”")
         #end if
         if params != None :
             if (

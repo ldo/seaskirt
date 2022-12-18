@@ -1188,10 +1188,13 @@ class Stasis :
     " the request() method. Use the listen() method to create a WebSocket client" \
     " connection to listen for application events."
 
-    def __init__(self, host = "127.0.0.1", port = 8088, *, prefix = "/ari", username, password, debug = False) :
+    async def __new__(celf, host = "127.0.0.1", port = 8088, *, prefix = "/ari", username, password, debug = False) :
+        # doesn’t actually need to be async, defined async just to
+        # be consistent with other main API classes.
         if prefix != "" and not prefix.startswith("/") :
             raise ValueError("nonempty prefix must start with “/”")
         #end if
+        self = super().__new__(celf)
         self.host = host
         self.port = port
         self.prefix = prefix
@@ -1200,6 +1203,8 @@ class Stasis :
         self.passwd = ARIPasswordHandler(username, password)
         auth = urllib.request.HTTPBasicAuthHandler(self.passwd)
         self.opener = urllib.request.build_opener(auth)
+        return \
+            self
     #end __init__
 
     async def request(self, method, path, params) :

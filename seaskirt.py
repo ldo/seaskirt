@@ -1207,9 +1207,10 @@ class Stasis :
             self
     #end __init__
 
-    async def request(self, method, path, params) :
-        "initiates a request to the specified path with the specified params," \
-        " and returns a Python object decoded from the JSON response string."
+    async def request(self, method, path, params, data = None) :
+        "initiates a request to the specified path with the specified params and" \
+        "(optional) request body object, and returns a Python object decoded from" \
+        " the JSON response string."
         if not isinstance(method, RESTMETHOD) :
             raise TypeError("method must be an instance of RESTMETHOD")
         #end if
@@ -1244,15 +1245,32 @@ class Stasis :
         if self.debug :
             sys.stderr.write("ARI request URL = %s\n" % url)
         #end if
+        if data != None :
+            if isinstance(data, (list, tuple, dict)) :
+                data = json.dumps(data).encode()
+            elif isinstance(data, (bytes, bytearray)) :
+                pass
+            else :
+                raise TypeError("unsupported type %s for data" % type(data).__name__)
+            #end if
+            if self.debug :
+                sys.stderr.write("ARI data = %s\n" % repr(data))
+            #end if
+            if method != RESTMETHOD.POST :
+                raise ValueError("request body only allowed for POST")
+            #end if
+        #end if
         fail = None
         try :
             request = urllib.request.Request \
               (
                 url,
+                data = data,
                 method = method.methodstr,
                 headers =
                     {
                         "Authorization" : self.passwd.make_basic_auth(),
+                        "Content-type" : "application/json",
                     }
               )
             if ASYNC :

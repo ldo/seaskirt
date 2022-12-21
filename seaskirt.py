@@ -969,6 +969,17 @@ class Gateway :
                 result
         #end listen
 
+        async def close(self) :
+            if self.conn != None :
+                if ASYNC :
+                    await call_async(self.conn.close, ())
+                else :
+                    self.conn.close()
+                #end if
+                self.conn = None
+            #end if
+        #end close
+
     #end Listener
 
     @classmethod

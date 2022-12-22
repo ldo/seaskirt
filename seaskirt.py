@@ -336,6 +336,10 @@ class AsyncFile :
     @staticmethod
     def do_run(requests) :
         # processes actual I/O requests on a separate thread.
+        # Note I don’t have an explicit procedure for shutting
+        # this down (e.g. when the file is closed), because I’m
+        # not expecting many of these objects to be created
+        # and destroyed over the life of the process.
         while True :
             elt = requests.get()
             fail = None

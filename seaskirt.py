@@ -288,8 +288,12 @@ class AsyncFile :
     def __init__(self, fv) :
         self.fv = fv
         self.requests = queue.Queue(maxsize = 1)
-        self.runner = threading.Thread(target = self.do_run, args = (self.requests,), daemon = True)
-        self.runner.daemon = True
+        self.runner = threading.Thread \
+          (
+            target = self.do_run,
+            args = (self.requests,),
+            daemon = True
+          )
         self.runner.start()
     #end __init__
 

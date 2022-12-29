@@ -1405,9 +1405,9 @@ class Stasis :
                     if not self.closing :
                         self.closing = True
                         if ASYNC :
-                            await loop.sock_sendall(self.ws.send(event.response()))
+                            await loop.sock_sendall(self.sock, self.ws.send(event.response()))
                         else :
-                            self.sock.sendall(self.ws.send(event.response()))
+                            self.sock.sendall(self.sock, self.ws.send(event.response()))
                         #end if
                     #end if
                 elif isinstance(event, wsevents.Ping) :
@@ -1438,14 +1438,20 @@ class Stasis :
                 if not self.closing :
                     self.closing = True
                     if ASYNC :
-                        await asyncio.get_running_loop().sock_sendall(self.ws.send(wsevents.CloseConnection(1000, "bye-bye")))
+                        await asyncio.get_running_loop().sock_sendall(self.sock, self.ws.send(wsevents.CloseConnection(1000, "bye-bye")))
                     else :
                         self.sock.sendall(self.ws.send(wsevents.CloseConnection(1000, "bye-bye")))
                     #end if
                 #end if
-                for event in self.process() :
-                    pass
-                #end for
+                if ASYNC :
+                    async for event in self.process() :
+                        pass
+                    #end for
+                else :
+                    for event in self.process() :
+                        pass
+                    #end for
+                #end if
                 self.sock.close()
                 self.sock = None
             #end if

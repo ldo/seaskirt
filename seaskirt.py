@@ -1341,6 +1341,7 @@ class Stasis :
             self.fileno = self.sock.fileno
             self.EOF = self.closing = False
             self.partial = ""
+            self.read_wait = False # always try first read immediately
             req = self.ws.send \
               (
                 wsevents.Request
@@ -1368,6 +1369,37 @@ class Stasis :
                 self
         #end __new__
 
+        async def wait_readable(self, timeout = None) :
+            "lets you block until further events are available to be read," \
+            " or the specified timeout elapses. Returns True iff you should try" \
+            " reading more input."
+            if self.read_wait :
+                # only block if last actual read on socket indicated no data
+                # was available
+                if ASYNC :
+                    readable = (await sock_wait_async \
+                      (
+                        self.sock,
+                        recv = True,
+                        send = False,
+                        timeout = timeout
+                      ))[0]
+                else :
+                    readable = sock_wait \
+                      (
+                        self.sock,
+                        recv = True,
+                        send = False,
+                        timeout = timeout
+                      )[0]
+                #end if
+            else :
+                readable = True
+            #end if
+            return \
+                readable
+        #end wait_readable
+
         async def process(self) :
             "Call this when your event loop gets a notification that input is" \
             " pending on the WebSocket connection. It will yield any received" \
@@ -1377,6 +1409,7 @@ class Stasis :
             except BlockingIOError :
                 data = None
             #end try
+            self.read_wait = data == None
             if data != None :
                 if len(data) != 0 :
                     self.ws.receive_data(data)

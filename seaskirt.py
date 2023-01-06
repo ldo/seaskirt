@@ -1646,10 +1646,10 @@ class Console :
     #end send
 
     def process(self, recv = True, send = True) :
-        "receives any pending data from Asterisk (if recv) and also" \
-        " sends it any pending commands from us (if send). Invoke this" \
-        " from your event loop when monitoring of the conn socket indicates" \
-        " that something is ready to be received or sent."
+        "low-level call: receives any pending data from Asterisk (if recv)" \
+        " and also sends it any pending commands from us (if send). You can" \
+        " invoke this from your event loop when monitoring of the conn" \
+        " socket indicates that something is ready to be received or sent."
         received_something = sent_something = False
         if recv :
             while not self.EOF :
@@ -1687,47 +1687,10 @@ class Console :
             (received_something, sent_something)
     #end process
 
-    def get_response(self) :
-        "returns any (partial) response line received so far, together with its" \
-        " verbosity level. A complete line will end with a newline character," \
-        " while a partial one will end with a null (not included). If neither" \
-        " delimiter has been seen yet, then the empty string is returned."
-        to_decode = self.received
-        prefix = b""
-        verbosity = 0
-        if len(to_decode) != 0 and to_decode[0] >= 128 :
-            prefix = to_decode[:1]
-            verbosity = 256 - prefix[0] - 1
-            to_decode = to_decode[1:]
-        #end if
-        line_end = to_decode.find(0)
-        skip = 0
-        if line_end >= 0 :
-            # drop null from self.received without including it in
-            # decoded result
-            skip = 1
-        else :
-            line_end = to_decode.find(10)
-            if line_end >= 0 :
-                line_end += 1 # include newline in result
-            #end if
-        #end if
-        if line_end >= 0 :
-            to_decode = to_decode[:line_end]
-            result = to_decode.decode()
-            self.received = self.received[len(prefix) + len(to_decode) + skip:]
-              # drop decoded data
-        else :
-            result = ""
-        #end if
-        return \
-            (verbosity, result)
-    #end get_response
-
     async def flush(self, timeout = None) :
-        "ensures that any pending commands have been sent, or the given timeout" \
-        " (if any) has elapsed. There may be returned responses available to be" \
-        " retrieved after this."
+        "low-level call: ensures that any pending commands have been sent," \
+        " or the given timeout (if any) has elapsed. There may be returned" \
+        " responses available to be retrieved after this."
         while True :
             if ASYNC :
                 recv, send = await sock_wait_async \
@@ -1749,13 +1712,80 @@ class Console :
             if not (recv or send) :
                 # timeout
                 break
-            done = self.process(recv = recv, send = send)
+            self.process(recv = recv, send = send)
             if len(self.to_send) == 0 :
                 break
         #end while
         return \
             self
     #end flush
+
+    async def get_response(self, timeout = None) :
+        "high-level call: returns any (partial) response line received so far," \
+        " together with its verbosity level. A complete line will end with a" \
+        " newline character, while a partial one will end with a null (not" \
+        " included). If neither delimiter has been seen before the timeout," \
+        " then (None, None) is returned."
+        recv = True # to begin with
+        while True :
+            if recv :
+                to_decode = self.received
+                prefix = b""
+                verbosity = 0
+                if len(to_decode) != 0 and to_decode[0] >= 128 :
+                    prefix = to_decode[:1]
+                    verbosity = 256 - prefix[0] - 1
+                    to_decode = to_decode[1:]
+                #end if
+                if len(to_decode) > 0 :
+                    line_end = to_decode.find(0)
+                    skip = 0
+                    if line_end >= 0 :
+                        # drop null from self.received without including it in
+                        # decoded result
+                        skip = 1
+                    else :
+                        line_end = to_decode.find(10)
+                        if line_end >= 0 :
+                            line_end += 1 # include newline in result
+                        #end if
+                    #end if
+                    if line_end >= 0 :
+                        to_decode = to_decode[:line_end]
+                        result = to_decode.decode()
+                        self.received = self.received[len(prefix) + len(to_decode) + skip:]
+                          # drop decoded data
+                        break
+                    #end if
+                #end if
+            #end if
+            if ASYNC :
+                recv, send = await sock_wait_async \
+                  (
+                    sock = self.conn,
+                    recv = True,
+                    send = len(self.to_send) != 0,
+                    timeout = timeout
+                  )
+            else :
+                recv, send = sock_wait \
+                  (
+                    sock = self.conn,
+                    recv = True,
+                    send = len(self.to_send) != 0,
+                    timeout = timeout
+                  )
+            #end if
+            if not (recv or send) :
+                # nothing more happening before timeout
+                verbosity = result = None
+                break
+            #end if
+            recv, send = self.process(recv, send)
+        #end while
+        return \
+            (verbosity, result)
+    #end get_response
 
     async def close(self) :
         if self.conn != None :

@@ -627,55 +627,59 @@ class Manager :
         #end if
     #end send_request
 
-    async def get_response(self) :
+    async def get_response(self, timeout = None) :
         "reads and parses another response from the Asterisk Manager connection." \
         " This can be a reply to a prior request, or it can be an unsolicited event" \
         " notification, if you have enabled those on this connection."
-        response = {}
+        NL = self.NL
+        response = None # to begin with
         while True :
-            split = self.buff.split(self.NL, 1)
-            if len(split) == 2 :
-                self.buff = split[1]
-                if len(split[0]) == 0 :
-                    break
-                keyword, value = split[0].split(": ", 1)
-                if keyword in response :
-                    response[keyword] += "\n" + value
-                else :
-                    response[keyword] = value
-                #end if
+            endpos = self.buff.find(NL + NL)
+            if endpos >= 0 :
+                # got at least one complete response
+                resp = self.buff[:endpos + len(NL)] # include one NL at end
+                self.buff = self.buff[endpos + 2 * len(NL):]
+                response = {}
+                while True :
+                    split, resp = resp.split(NL, 1)
+                    keyword, value = split.split(": ", 1)
+                    if keyword in response :
+                        response[keyword] += "\n" + value
+                    else :
+                        response[keyword] = value
+                    #end if
+                    if resp == "" :
+                        break
+                #end while
+                break
+            #end if
+            # need more input
+            if self.EOF :
+                raise EOFError("Asterisk Manager connection EOF")
+            #end if
+            if ASYNC :
+                recv = (await sock_wait_async(self.conn, True, False, timeout))[0]
             else :
-                if self.debug :
-                    sys.stderr.write("Manager getting more\n")
-                #end if
-                if ASYNC :
-                    recv = (await sock_wait_async(self.conn, True, False))[0]
-                else :
-                    recv = sock_wait(self.conn, True, False)[0]
-                #end if
-                assert recv
-                more = self.conn.recv(IOBUFSIZE)
-                if len(more) == 0 :
-                    self.EOF = True
-                    break
-                #end if
-                self.buff += more.decode()
-                if self.debug :
-                    sys.stderr.write \
-                      (
-                        "Manager got (%u): \"%s\"\n" % (len(self.buff), self.buff)
-                      )
-                #end if
+                recv = sock_wait(self.conn, True, False, timeout)[0]
+            #end if
+            if not recv :
+                # timeout
+                break
+            more = self.conn.recv(IOBUFSIZE)
+            self.buff += more.decode()
+            if self.debug :
+                sys.stderr.write \
+                  (
+                    "Manager got (%u): \"%s\"\n" % (len(self.buff), self.buff)
+                  )
+            #end if
+            if len(more) == 0 :
+                self.EOF = True
             #end if
         #end while
-        return response
+        return \
+            response
     #end get_response
-
-    def got_more_response(self) :
-        "returns True iff there’s another response from the Asterisk Manager" \
-        " connection in the buffer waiting to be parsed and returned."
-        return len(self.buff.split(self.NL + self.NL, 1)) == 2
-    #end got_more_response
 
     async def transact(self, action, parms, vars = None) :
         "does a basic transaction and returns the single response" \
@@ -1375,7 +1379,7 @@ class Stasis :
             " to be read, or the specified timeout elapses. Returns True iff" \
             " you should try reading more input."
             if self.EOF :
-                raise EOFError
+                raise EOFError("Asterisk WebSocket wait EOF")
             #end if
             if self.read_wait :
                 # only block if last actual read on socket indicated no data
@@ -1495,7 +1499,7 @@ class Stasis :
                     self.current_reading = None # iterator exhausted
                 #end if
                 if self.EOF :
-                    raise EOFError
+                    raise EOFError("Asterisk WebSocket connection EOF")
                 #end if
                 if ASYNC :
                     readable = await self.wait_readable(timeout)

@@ -1342,6 +1342,7 @@ class Stasis :
             self.EOF = self.closing = False
             self.partial = ""
             self.read_wait = False # always try first read immediately
+            self.current_reading = None
             req = self.ws.send \
               (
                 wsevents.Request
@@ -1370,9 +1371,9 @@ class Stasis :
         #end __new__
 
         async def wait_readable(self, timeout = None) :
-            "lets you block until further events are available to be read," \
-            " or the specified timeout elapses. Returns True iff you should try" \
-            " reading more input."
+            "low-level call: lets you block until further events are available" \
+            " to be read, or the specified timeout elapses. Returns True iff" \
+            " you should try reading more input."
             if self.read_wait :
                 # only block if last actual read on socket indicated no data
                 # was available
@@ -1401,9 +1402,9 @@ class Stasis :
         #end wait_readable
 
         async def process(self) :
-            "Call this when your event loop gets a notification that input is" \
-            " pending on the WebSocket connection. It will yield any received" \
-            " events."
+            "low-level call, for when your event loop gets a notification that" \
+            " input is pending on the WebSocket connection. It will yield any" \
+            " received events."
             try :
                 data = self.sock.recv(IOBUFSIZE, socket.MSG_DONTWAIT)
             except BlockingIOError :
@@ -1466,12 +1467,69 @@ class Stasis :
             #end while
         #end process
 
+        async def get_event(self, timeout = None) :
+            "high-level call: retrieves the next event, automatically waiting" \
+            " if necessary. Returns None on timeout if timeout was specified," \
+            " else waits indefinitely."
+            assert not self.closing
+            while True :
+                if self.current_reading != None :
+                    if ASYNC :
+                        # evt = await anext(self.current_reading, None)
+                          # only available in Python 3.10 or later
+                        try :
+                            evt = await self.current_reading.__anext__()
+                        except StopAsyncIteration :
+                            evt = None
+                        #end try
+                    else :
+                        evt = next(self.current_reading, None)
+                    #end if
+                    if evt != None :
+                        break
+                    self.current_reading = None # iterator exhausted
+                #end if
+                if ASYNC :
+                    readable = await self.wait_readable(timeout)
+                else :
+                    readable = self.wait_readable(timeout)
+                #end if
+                if not readable :
+                    # timeout
+                    evt = None
+                    break
+                #end if
+                self.current_reading = self.process()
+            #end while
+            return \
+                evt
+        #end get_event
+
         async def close(self) :
             if self.sock != None :
+                if self.current_reading != None :
+                    if ASYNC :
+                        while True :
+                            try :
+                                await self.current_reading.__anext__()
+                            except StopAsyncIteration :
+                                break
+                            #end try
+                        #end while
+                    else :
+                        while next(self.current_reading, None) != None :
+                            pass
+                        #end while
+                    #end if
+                #end if
                 if not self.closing :
                     self.closing = True
                     if ASYNC :
-                        await asyncio.get_running_loop().sock_sendall(self.sock, self.ws.send(wsevents.CloseConnection(1000, "bye-bye")))
+                        await asyncio.get_running_loop().sock_sendall \
+                          (
+                            self.sock,
+                            self.ws.send(wsevents.CloseConnection(1000, "bye-bye"))
+                          )
                     else :
                         self.sock.sendall(self.ws.send(wsevents.CloseConnection(1000, "bye-bye")))
                     #end if

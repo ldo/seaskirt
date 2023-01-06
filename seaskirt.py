@@ -1374,6 +1374,9 @@ class Stasis :
             "low-level call: lets you block until further events are available" \
             " to be read, or the specified timeout elapses. Returns True iff" \
             " you should try reading more input."
+            if self.EOF :
+                raise EOFError
+            #end if
             if self.read_wait :
                 # only block if last actual read on socket indicated no data
                 # was available
@@ -1405,17 +1408,19 @@ class Stasis :
             "low-level call, for when your event loop gets a notification that" \
             " input is pending on the WebSocket connection. It will yield any" \
             " received events."
-            try :
-                data = self.sock.recv(IOBUFSIZE, socket.MSG_DONTWAIT)
-            except BlockingIOError :
-                data = None
-            #end try
-            self.read_wait = data == None
-            if data != None :
-                if len(data) != 0 :
-                    self.ws.receive_data(data)
-                else :
-                    self.EOF = True
+            if not self.EOF :
+                try :
+                    data = self.sock.recv(IOBUFSIZE, socket.MSG_DONTWAIT)
+                except BlockingIOError :
+                    data = None
+                #end try
+                self.read_wait = data == None
+                if data != None :
+                    if len(data) != 0 :
+                        self.ws.receive_data(data)
+                    else :
+                        self.EOF = True
+                    #end if
                 #end if
             #end if
             if ASYNC :
@@ -1488,6 +1493,9 @@ class Stasis :
                     if evt != None :
                         break
                     self.current_reading = None # iterator exhausted
+                #end if
+                if self.EOF :
+                    raise EOFError
                 #end if
                 if ASYNC :
                     readable = await self.wait_readable(timeout)

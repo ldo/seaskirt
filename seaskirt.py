@@ -21,11 +21,13 @@
 
 import sys
 import os
+import time
 import enum
 import errno
 from weakref import \
     ref as weak_ref
 import socket
+import ssl
 import threading
 import queue
 import base64
@@ -245,7 +247,7 @@ def call_async(func, funcargs = (), timeout = None, abort = None, loop = None) :
         awaiting = ref_awaiting()
         if awaiting != None :
             if not awaiting.done() :
-                awaiting.set_exception(TimeoutError())
+                awaiting.set_exception(TimeoutError("async operation taking too long"))
                 # Python doesn’t give me any (easy) way to cancel the thread running the
                 # do_func() call, so just let it run to completion, whereupon func_done()
                 # will get rid of the result. Even if I could delete the thread, can I be sure
@@ -281,13 +283,71 @@ def call_async(func, funcargs = (), timeout = None, abort = None, loop = None) :
         awaiting
 #end call_async
 
-class AsyncFile :
-    "wrapper around Python file objects which makes all (relevant) calls" \
+class AsyncProcessor :
+    "wrapper around Python I/O-related objects which makes all (relevant) calls" \
     " asynchronous by passing them off to a dedicated request-runner thread."
 
-    def __init__(self, fv) :
-        self.fv = fv
+    def __init__(self, io_obj, funcdefs) :
+
+        def def_queue_request(name, nrargs) :
+            # defines an async wrapper around the given method of io_obj
+            # as a method of this class with the same name.
+
+            Request = type(self).Request
+            io_meth = getattr(io_obj, name)
+
+            async def reqfunc(*args) :
+                if len(args) != nrargs :
+                    raise TypeError \
+                      (
+                            "%s.%s expects %d args, not %d"
+                        %
+                            (type(io_obj).__name__, name, nrargs, len(args))
+                      )
+                #end if
+                return \
+                    await Request(self, io_meth, args)
+            #end reqfunc
+
+        #begin def_queue_request
+            reqfunc.__name__ = name
+            setattr(self, name, reqfunc)
+        #end def_queue_request
+
+    #begin __init__
+        if (
+                not isinstance(funcdefs, (list, tuple))
+            or
+                not all
+                  (
+                        isinstance(name, str)
+                    and
+                        not name.startswith("_")
+                    and
+                        name not in
+                            {
+                                "fileno", "do_run", "io_obj", "Request",
+                                "requests", "runner", "stopping", "terminate",
+                            }
+                          # attributes of base class
+                    and
+                        isinstance(nrargs, int)
+                    and
+                        nrargs >= 0
+                    for name, nrargs in funcdefs
+                  )
+        ) :
+            raise TypeError("funcdefs must be sequence of («name», «nrargs») pairs")
+        #end if
+        for name, nrargs in funcdefs :
+            def_queue_request(name, nrargs)
+        #end for
+        self.io_obj = io_obj
         self.requests = queue.Queue(maxsize = 1)
+          # Minimum finite value I can set. I wonder why a maxsize of 0
+          # doesn’t mean 0: putting a request on the queue would block
+          # until the processor is ready to retrieve it.
+        self.stopping = False
         self.runner = threading.Thread \
           (
             target = self.do_run,
@@ -299,7 +359,7 @@ class AsyncFile :
 
     def fileno(self) :
         return \
-            self.fv.fileno()
+            self.io_obj.fileno()
     #end fileno
 
     class Request :
@@ -336,12 +396,13 @@ class AsyncFile :
     @staticmethod
     def do_run(requests) :
         # processes actual I/O requests on a separate thread.
-        # Note I don’t have an explicit procedure for shutting
-        # this down (e.g. when the file is closed), because I’m
-        # not expecting many of these objects to be created
-        # and destroyed over the life of the process.
+        # A “None” queue element is treated as a request to terminate.
         while True :
             elt = requests.get()
+            if elt == None :
+                requests.task_done()
+                break
+            #end if
             fail = None
             try :
                 res = elt.fn(*elt.fnargs)
@@ -354,34 +415,64 @@ class AsyncFile :
         #end while
     #end do_run
 
-    # async wrappers around synchronous file calls -- list all the ones I actually use
+    def terminate(self) :
+        "tells the processor thread to terminate."
+        if not self.stopping :
+            self.stopping = True
+            self.requests.put(None)
+        #end if
+    #end terminate
 
-    async def read(self, nrbytes) :
-        return \
-            await type(self).Request(self, self.fv.read, (nrbytes,))
-    #end read
+#end AsyncProcessor
 
-    async def readline(self) :
-        return \
-            await type(self).Request(self, self.fv.readline, ())
-    #end readline
+class AsyncFile(AsyncProcessor) :
+    "AsyncProcessor subclass for wrapping Python file objects."
 
-    async def write(self, data) :
-        return \
-            await type(self).Request(self, self.fv.write, (data,))
-    #end write
-
-    async def flush(self) :
-        return \
-            await type(self).Request(self, self.fv.flush, ())
-    #end flush
-
-    async def close(self) :
-        return \
-            await type(self).Request(self, self.fv.close, ())
-    #end close
+    def __init__(self, fv) :
+        super().__init__ \
+          (
+            fv,
+            [ # list all the calls I actually use
+                ("read", 1),
+                ("readline", 0),
+                ("write", 1),
+                ("flush", 0),
+                ("close", 0),
+            ]
+          )
+    #end __init__
 
 #end AsyncFile
+
+class AsyncSocket(AsyncProcessor) :
+    "AsyncProcessor subclass for wrapping Python socket objects. This is mainly" \
+    " needed because the asyncio non-blocking socket calls don’t work on SSLSocket" \
+    " objects."
+    # not used anywhere: delete.
+
+    def __init__(self, sock) :
+        super().__init__ \
+          (
+            sock,
+            [ # list all the calls I actually use
+                ("connect", 1),
+                ("recv", 1), # no flags arg allowed for SSLSocket
+                ("sendall", 1),
+                ("shutdown", 1),
+                ("close", 0),
+            ]
+          )
+    #end __init__
+
+#end AsyncSocket
+
+class SOCK_NEED(enum.Enum) :
+    "need to wait for socket to allow I/O of this type before further" \
+    " communication can proceed."
+    NOTHING = 0 # I/O can proceed
+    READABLE = 1 # wait for socket to become readable
+    WRITABLE = 2 # wait for socket to become writable
+#end SOCK_NEED
 
 IOBUFSIZE = 4096 # size of most I/O buffers
 SMALL_IOBUFSIZE = 256 # size used for reads expected to be small
@@ -486,8 +577,488 @@ async def sock_wait_async(sock, recv, send, timeout = None) :
 #end sock_wait_async
 
 #+
+# Socket wrapper classes. These try to offer as uniform
+# an abstraction as possible that covers both encrypted
+# and non-encrypted sockets.
+#-
+
+# common method definitions which could go in a subclass of
+# SocketWrapper/SocketWrapperAsync/SSLSocketWrapper/SSLSocketWrapperAsync,
+# if such a thing could exist:
+
+def _poll_register(self, poll) :
+    "registers this socket with the given poll object, if it needs to. Returns" \
+    " True iff registration was done."
+    register = self.sock_need != SOCK_NEED.NOTHING
+    if register :
+        poll.register \
+          (
+            self.sock,
+            {
+                SOCK_NEED.READABLE : select.POLLIN,
+                SOCK_NEED.WRITABLE : select.POLLOUT,
+            }[self.sock_need]
+          )
+    #end if
+    return \
+        register
+#end _poll_register
+_poll_register.__name__ = "poll_register"
+
+def _io_wait_sync(self, timeout = None) :
+    "blocks as appropriate until the socket is ready to try immediate-mode" \
+    " reading or writing, as determined by the state saved from the last" \
+    " recvimmed/sendimmed call."
+    if self.sock_need != SOCK_NEED.NOTHING :
+        poll = select.poll()
+        assert self.poll_register(poll)
+        ready = poll.poll(timeout)
+        if len(ready) > 0 :
+            assert len(ready) == 1
+            ready, = ready
+            assert ready[0] == self.sock.fileno()
+            flags = ready[1]
+            recv = flags & select.POLLIN != 0
+            send = flags & select.POLLOUT != 0
+        else :
+            recv = send = False
+        #end if
+        self.sock_need = SOCK_NEED.NOTHING
+    else :
+        recv = send = True
+    #end if
+    return \
+        recv, send
+#end _io_wait_sync
+_io_wait_sync.__name__ = "io_wait"
+
+async def _io_wait_async(self, timeout = None) :
+    "blocks as appropriate until the socket is ready to try immediate-mode" \
+    " reading or writing, as determined by the state saved from the last" \
+    " recvimmed/sendimmed call."
+    if self.sock_need != SOCK_NEED.NOTHING :
+        recv, send = await sock_wait_async \
+          (
+            self.sock.fileno(),
+            recv = self.sock_need == SOCK_NEED.READABLE,
+            send = self.sock_need == SOCK_NEED.WRITABLE,
+            timeout = timeout
+          )
+        self.sock_need = SOCK_NEED.NOTHING
+    else :
+        recv = send = True
+    #end if
+    return \
+        recv, send
+#end _io_wait_async
+_io_wait_async.__name__ = "io_wait"
+
+class SocketWrapper :
+    "a wrapper around unencrypted socket connections, providing sync or async" \
+    " transfers with optional timeouts. Note no fileno() method is provided, for" \
+    " compatibility with SSLSocketWrapper."
+
+    def __init__(self) :
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock = sock
+        self.sock_need = SOCK_NEED.NOTHING
+          # set by immediate-mode calls, used by I/O-polling hooks to decide what to wait for
+    #end __init__
+
+    async def connect(self, addr, timeout = None) :
+        if ASYNC :
+            await call_async(self.sock.connect, (addr,), timeout = timeout)
+        else :
+            # TODO: timeout
+            self.sock.connect(addr)
+        #end if
+    #end connect
+
+    async def recv(self, nrbytes, timeout = None) :
+        self.sock_need = SOCK_NEED.NOTHING
+        if timeout != None :
+            deadline = time.monotonic() + timeout
+        else :
+            deadline = None
+        #end if
+        while True :
+            try :
+                got = self.sock.recv(nrbytes, socket.MSG_DONTWAIT)
+            except BlockingIOError :
+                got = None
+            #end try
+            if got != None :
+                timed_out = False
+                break
+            #end if
+            if timeout == 0 :
+                timed_out = True
+                break
+            #end if
+            if deadline != None :
+                now = time.monotonic()
+                if now > deadline :
+                    timed_out = True
+                    break
+                #end if
+                timeout = deadline - now
+            else :
+                timeout = None
+            #end if
+            if ASYNC :
+                recv = (await sock_wait_async(self.sock, True, False, timeout))[0]
+            else :
+                recv = sock_wait(self.sock, True, False, timeout)[0]
+            #end if
+            if not recv :
+                timed_out = True
+                break
+            #end if
+        #end while
+        if timed_out :
+            nr_bytes = None
+        #end if
+        return \
+            got
+    #end recv
+
+    def recvimmed(self, nrbytes) :
+        self.sock_need = SOCK_NEED.NOTHING
+        try :
+            data = self.sock.recv(nrbytes, socket.MSG_DONTWAIT)
+        except BlockingIOError :
+            data = None
+            self.sock_need = SOCK_NEED.READABLE
+        #end try
+        return \
+            data
+    #end recvimmed
+
+    async def sendall(self, data, timeout = None) :
+        self.sock_need = SOCK_NEED.NOTHING
+        if timeout != None :
+            deadline = time.monotonic() + timeout
+        else :
+            deadline = None
+        #end if
+        while True :
+            try :
+                sent = self.sock.send(data, socket.MSG_DONTWAIT)
+            except BlockingIOError :
+                sent = 0
+            #end try
+            data = data[sent:]
+            if len(data) == 0 :
+                timed_out = False
+                break
+            #end if
+            if deadline != None :
+                now = time.monotonic()
+                if now > deadline :
+                    timed_out = True
+                    break
+                #end if
+                timeout = deadline - now
+            else :
+                timeout = None
+            #end if
+            if ASYNC :
+                send = (await sock_wait_async(self.sock, False, True, timeout))[1]
+            else :
+                send = sock_wait(self.sock, False, True, timeout)[1]
+            #end if
+            if not send :
+                timed_out = True
+                break
+            #end if
+        #end while
+        if timed_out :
+            raise TimeoutError("socket taking too long to send")
+        #end if
+    #end sendall
+
+    def sendimmed(self, data) :
+        self.sock_need = SOCK_NEED.NOTHING
+        try :
+            sent = self.sock.send(data, socket.MSG_DONTWAIT)
+        except BlockingIOError :
+            sent = 0
+            self.sock_need = SOCK_NEED.WRITABLE
+        #end try
+        return \
+            sent
+    #end sendimmed
+
+    async def close(self) :
+        if self.sock != None :
+            if ASYNC :
+                await call_async(self.sock.close, ())
+            else :
+                self.sock.close()
+            #end if
+            self.sock = None
+        #end if
+    #end close
+
+    poll_register = _poll_register
+
+#end SocketWrapper
+
+def_sync_async_classes(SocketWrapper, "SocketWrapper", "SocketWrapperAsync")
+SocketWrapper.io_wait = _io_wait_sync
+SocketWrapperAsync.io_wait = _io_wait_async
+
+def get_ssl_context(ssl_context) :
+    if isinstance(ssl_context, (bytes, bytearray, str)) :
+        ca_path = ssl_context
+        if ca_path.endswith("/") :
+            ca_file = None
+        else :
+            ca_file = ca_path
+            ca_path = None
+        #end if
+        ssl_context = ssl.SSLContext(protocol = ssl.PROTOCOL_TLS_CLIENT)
+        ssl_context.check_hostname = False
+        ssl_context.load_verify_locations(ca_file, ca_path)
+    elif not isinstance(ssl_context, ssl.SSLContext) :
+        raise TypeError \
+          (
+            "ssl_context must be SSLContext or file/directory pathname for CA cert(s)"
+          )
+    #end if
+    return \
+        ssl_context
+#end get_ssl_context
+
+class SSLSocketWrapper :
+    "a wrapper around TLS-encrypted socket connections, providing sync or async" \
+    " transfers with optional timeouts. ssl_context can be specified as the path" \
+    " to the CA cert file or directory, or a preconfigured ssl.SSLContext object." \
+    " Note no fileno() method is provided, since SSL may require writes before you" \
+    " can read more, or vice versa; so use poll_register() and io_wait() calls" \
+    " if you want to hook into an event loop safely."
+
+    def __init__(self, ssl_context) :
+        self.ssl_context = get_ssl_context(ssl_context)
+        self.sock = self.ssl_context.wrap_socket \
+          (
+            socket.socket(socket.AF_INET, socket.SOCK_STREAM),
+            server_side = False,
+            do_handshake_on_connect = False
+              # defer handshake until nonblocking mode has been enabled
+          )
+        self.sock_need = SOCK_NEED.NOTHING
+          # set by immediate-mode calls, used by I/O-polling hooks to decide what to wait for
+        if ASYNC :
+            self.wait_avail =  None
+        #end if
+    #end __init__
+
+    class DoAgain(Exception) :
+        # an indication that the I/O operation has only been partially done so far,
+        # and needs to be repeated.
+        pass
+    #end DoAgain
+
+    async def _do_io(self, opname, meth, args, timeout, signal_timeout = True) :
+        self.sock_need = SOCK_NEED.NOTHING
+        DoAgain = type(self).DoAgain
+        if timeout != None :
+            deadline = time.monotonic() + timeout
+        else :
+            deadline = None
+        #end if
+        if ASYNC :
+            my_wait_avail = asyncio.get_running_loop().create_future()
+            if self.wait_avail != None :
+                # somebody else using this socket -- wait till they’re done
+                await self.wait_avail
+            #end if
+            assert self.wait_avail == None
+            self.wait_avail = my_wait_avail
+              # claim ownership of socket
+        #end if
+        try :
+            while True :
+                sock_need = None
+                do_again = False
+                try :
+                    try :
+                        result = meth(*args)
+                    except DoAgain :
+                        do_again = True
+                    #end try
+                except ssl.SSLWantReadError :
+                    sock_need = SOCK_NEED.READABLE
+                except ssl.SSLWantWriteError :
+                    sock_need = SOCK_NEED.WRITABLE
+                #end try
+                if sock_need == None and not do_again :
+                    timed_out = False
+                    break
+                #end if
+                if deadline != None :
+                    now = time.monotonic()
+                    if now > deadline :
+                        timed_out = True
+                        break
+                    #end if
+                    timeout = deadline - now
+                else :
+                    timeout = None
+                #end if
+                if sock_need != None :
+                    if ASYNC :
+                        recv, send = await sock_wait_async \
+                          (
+                            self.sock.fileno(),
+                            recv = sock_need == SOCK_NEED.READABLE,
+                            send = sock_need == SOCK_NEED.WRITABLE,
+                            timeout = timeout
+                          )
+                    else :
+                        recv, send = sock_wait \
+                          (
+                            self.sock.fileno(),
+                            recv = sock_need == SOCK_NEED.READABLE,
+                            send = sock_need == SOCK_NEED.WRITABLE,
+                            timeout = timeout
+                          )
+                    #end if
+                    if not (recv or send) :
+                        timed_out = True
+                        break
+                    #end if
+                #end if
+            #end while
+        finally :
+            if ASYNC :
+                my_wait_avail.set_result(None)
+                assert self.wait_avail == my_wait_avail
+                self.wait_avail = None
+            #end if
+        #end try
+        if timed_out :
+            if signal_timeout :
+                raise TimeoutError("socket taking too long to %s" % opname)
+            else :
+                result = None
+            #end if
+        #end if
+        return \
+            result
+    #end _do_io
+
+    async def connect(self, addr, timeout = None) :
+        if ASYNC :
+            await call_async(self.sock.connect, (addr,), timeout = timeout)
+            self.sock.setblocking(False)
+            await self._do_io("connect handshake", self.sock.do_handshake, (), timeout)
+        else :
+            # TODO: timeout
+            self.sock.connect(addr)
+            self.sock.setblocking(False)
+            self._do_io("connect handshake", self.sock.do_handshake, (), timeout)
+        #end if
+    #end connect
+
+    def recv(self, nrbytes, timeout = None) :
+        return \
+            self._do_io("receive", self.sock.recv, (nrbytes,), timeout, signal_timeout = False)
+    #end recv
+
+    def recvimmed(self, nrbytes) :
+        self.sock_need = SOCK_NEED.NOTHING
+        try :
+            data = self.sock.recv(nrbytes)
+        except ssl.SSLWantReadError:
+            data = None
+            self.sock_need = SOCK_NEED.READABLE
+        except ssl.SSLWantWriteError :
+            data = None
+            self.sock_need = SOCK_NEED.WRITABLE
+        #end try
+        return \
+            data
+    #end recvimmed
+
+    def sendall(self, data, timeout = None) :
+
+        DoAgain = type(self).DoAgain
+        sending = None # context for resuming partial sends
+
+        def send_some() :
+            sent = self.sock.send(sending["data"])
+            sending["data"] = sending["data"][sent:]
+            if len(sending["data"]) != 0 :
+                raise DoAgain
+            #end if
+        #end send_some
+
+    #begin sendall
+        sending = \
+            {
+                "data" : data,
+            }
+        return \
+            self._do_io("send", send_some, (), timeout)
+    #end sendall
+
+    def sendimmed(self, data) :
+        self.sock_need = SOCK_NEED.NOTHING
+        try :
+            sent = self.sock.send(data)
+        except ssl.SSLWantReadError:
+            sent = 0
+            self.sock_need = SOCK_NEED.READABLE
+        except ssl.SSLWantWriteError :
+            sent = 0
+            self.sock_need = SOCK_NEED.WRITABLE
+        #end try
+        return \
+            sent
+    #end sendimmed
+
+    def shutdown(self, how) :
+        return \
+            self._do_io("shutdown", self.sock.shutdown, (how,), None)
+    #end shutdown
+
+    def close(self) :
+        return \
+            self._do_io("close", self.sock.close, (), None)
+    #end close
+
+    poll_register = _poll_register
+
+#end SSLSocketWrapper
+
+def_sync_async_classes(SSLSocketWrapper, "SSLSocketWrapper", "SSLSocketWrapperAsync")
+SSLSocketWrapper.io_wait = _io_wait_sync
+SSLSocketWrapperAsync.io_wait = _io_wait_async
+
+def make_socket_wrapper(ssl_context, is_async) :
+    "interprets the various ways of specifying TLS/SSL info, as the path" \
+    " to a CA file or a directory containing CA files, or directly as a" \
+    " preconfigured ssl.Context object, returning an ssl.Context object in" \
+    " all cases."
+    if ssl_context != None :
+        result = (SSLSocketWrapper, SSLSocketWrapperAsync)[is_async](ssl_context)
+    else :
+        result = (SocketWrapper, SocketWrapperAsync)[is_async]()
+    #end if
+    return \
+        result
+#end make_socket_wrapper
+
+del _poll_register, _io_wait_sync, _io_wait_async # only needed above
+
+#+
 # Asterisk Manager Interface
 #-
+
+AMI_DEFAULT_PLAINTEXT_PORT = 5038
+AMI_DEFAULT_TLS_PORT = 5039
 
 class Manager :
     "simple management of an Asterisk Manager API connection. When setting" \
@@ -519,33 +1090,34 @@ class Manager :
         return str(parm).replace("\n", "")
     #end sanitize
 
-    async def __new__(celf, host = "127.0.0.1", port = 5038, *, username, password, want_events = False, id_gen = None, timeout = None, debug = False) :
+    async def __new__(celf, host = "127.0.0.1", port = None, *, ssl_context = None, username, password, want_events = False, id_gen = None, timeout = None, debug = False) :
         "opens connection, receives initial Hello message from Asterisk, and does" \
         " initial mandatory authentication handshake."
         self = super().__new__(celf)
         self.debug = debug
-        self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.timeout = timeout
         if id_gen != None and not hasattr(id_gen, "__next__") :
             raise TypeError("id_gen is not an iterator")
         #end if
         self.id_gen = id_gen
         self.last_request_id = None
-        if timeout != None :
-            self.conn.settimeout(timeout)
+        if port == None :
+            port = (AMI_DEFAULT_PLAINTEXT_PORT, AMI_DEFAULT_TLS_PORT)[ssl_context != None]
         #end if
         if ASYNC :
-            await call_async(self.conn.connect, ((host, port),))
-            self.conn.setblocking(False)
+            self.sock = make_socket_wrapper(ssl_context, True)
+            await self.sock.connect((host, port), timeout)
         else :
-            self.conn.connect((host, port))
+            self.sock = make_socket_wrapper(ssl_context, False)
+            self.sock.connect((host, port), timeout)
         #end if
         self.buff = ""
         self.EOF = False
         while True : # get initial hello msg
             if ASYNC :
-                more = await asyncio.get_running_loop().sock_recv(self.conn, SMALL_IOBUFSIZE)
+                more = await self.sock.recv(SMALL_IOBUFSIZE)
             else :
-                more = self.conn.recv(SMALL_IOBUFSIZE)
+                more = self.sock.recv(SMALL_IOBUFSIZE)
             #end if
             if len(more) == 0 :
                 self.EOF = True
@@ -583,21 +1155,25 @@ class Manager :
     async def close(self) :
         "closes the Asterisk Manager connection. Calling this on an" \
         " already-closed connection is harmless."
-        if self.conn != None :
+        if self.sock != None :
+            sock = self.sock
+            self.sock = None # stop further async calls
             if ASYNC :
-                await call_async(self.conn.close, ())
+                # await sock.shutdown(socket.SHUT_RDWR)
+                  # not necessary?
+                await sock.close()
             else :
-                self.conn.close()
+                # sock.shutdown(socket.SHUT_RDWR)
+                  # not necessary?
+                sock.close()
             #end if
-            self.conn = None
         #end if
     #end close
 
-    def fileno(self) :
-        "allows use in a select, for example to check if" \
-        " any unsolicited events are available to be read."
-        return self.conn.fileno()
-    #end fileno
+    def poll_register(self, poll) :
+        return \
+            self.sock.poll_register(poll)
+    #end poll_register
 
     async def send_request(self, action, parms, vars = None) :
         "sends a request to the Manager, leaving it up to you to retrieve" \
@@ -621,9 +1197,9 @@ class Manager :
             sys.stderr.write("Manager sending: %s" % to_send)
         #end if
         if ASYNC :
-            await asyncio.get_running_loop().sock_sendall(self.conn, to_send.encode())
+            await self.sock.sendall(to_send.encode(), self.timeout)
         else :
-            self.conn.sendall(to_send.encode())
+            self.sock.sendall(to_send.encode(), self.timeout)
         #end if
     #end send_request
 
@@ -632,6 +1208,9 @@ class Manager :
         " This can be a reply to a prior request, or it can be an unsolicited event" \
         " notification, if you have enabled those on this connection."
         NL = self.NL
+        if timeout == None :
+            timeout = self.timeout
+        #end if
         response = None # to begin with
         while True :
             endpos = self.buff.find(NL + NL)
@@ -658,14 +1237,13 @@ class Manager :
                 raise EOFError("Asterisk Manager connection EOF")
             #end if
             if ASYNC :
-                recv = (await sock_wait_async(self.conn, True, False, timeout))[0]
+                more = await self.sock.recv(IOBUFSIZE, timeout)
             else :
-                recv = sock_wait(self.conn, True, False, timeout)[0]
+                more = self.sock.recv(IOBUFSIZE, timeout)
             #end if
-            if not recv :
-                # timeout
+            if more == None :
+                # timed out
                 break
-            more = self.conn.recv(IOBUFSIZE)
             self.buff += more.decode()
             if self.debug :
                 sys.stderr.write \
@@ -697,6 +1275,9 @@ class Manager :
                 next_response = await self.get_response()
             else :
                 next_response = self.get_response()
+            #end if
+            if next_response == None :
+                raise TimeoutError("Manager transaction reply taking too long")
             #end if
             if self.EOF or len(next_response) == 0 :
                 break
@@ -752,9 +1333,9 @@ class Manager :
                     sys.stderr.write("Manager command getting more\n")
                 #end if
                 if ASYNC :
-                    more = await asyncio.get_running_loop().sock_recv(self.conn, IOBUFSIZE)
+                    more = await self.sock.recv(IOBUFSIZE, self.timeout)
                 else :
-                    more = self.conn.recv(IOBUFSIZE)
+                    more = self.sock.recv(IOBUFSIZE, self.timeout)
                 #end if
                 if len(more) == 0 :
                     self.EOF = True
@@ -880,7 +1461,7 @@ class Gateway :
     " incoming connections; the accept() method of this class will return a Gateway" \
     " instance for each such connection."
 
-    async def __new__(celf, *, from_asterisk = None, to_asterisk = None, args = None, with_audio_in = False) :
+    async def __new__(celf, *, from_asterisk = None, to_asterisk = None, args = None, with_audio_in = False, debug = False) :
         "from_asterisk and to_asterisk are file objects to use to communicate" \
         " with Asterisk; default to sys.stdin and sys.stdout if not specified, while" \
         " args are taken from sys.argv if not specified.\n" \
@@ -890,7 +1471,7 @@ class Gateway :
         "agi_vars attribute will be set to a dictionary containing all the initial" \
         " AGI variable definitions passed from Asterisk."
         self = super().__new__(celf)
-        self.debug = False # can be set to True by caller
+        self.debug = debug
         self.hungup = False
         if from_asterisk == None :
             from_asterisk = sys.stdin
@@ -950,21 +1531,21 @@ class Gateway :
         def __init__(self, parent, bindaddr, port, maxlisten = 0, debug = False) :
             self.debug = debug
             self.parent = parent
-            self.conn = socket.socket()
-            self.conn.bind((bindaddr, port))
-            self.conn.listen(maxlisten)
+            self.sock = socket.socket()
+            self.sock.bind((bindaddr, port))
+            self.sock.listen(maxlisten)
         #end __init__
 
         def fileno(self) :
             return \
-                self.conn.fileno()
+                self.sock.fileno()
         #end fileno
 
         async def accept(self) :
             if ASYNC :
-                sock, peer = await call_async(self.conn.accept, ())
+                sock, peer = await call_async(self.sock.accept, ())
             else :
-                sock, peer = self.conn.accept()
+                sock, peer = self.sock.accept()
             #end if
             connin = os.fdopen(os.dup(sock.fileno()), "rt")
             connout = os.fdopen(os.dup(sock.fileno()), "wt")
@@ -972,23 +1553,22 @@ class Gateway :
                 sys.stderr.write("%s.Listener connection from %s\n" % (self.parent.__name__, peer))
             #end if
             if ASYNC :
-                result = await self.parent(from_asterisk = connin, to_asterisk = connout)
+                result = await self.parent(from_asterisk = connin, to_asterisk = connout, debug = self.debug)
             else :
-                result = self.parent(from_asterisk = connin, to_asterisk = connout)
+                result = self.parent(from_asterisk = connin, to_asterisk = connout, debug = self.debug)
             #end if
-            result.debug = self.debug
             return \
                 result
         #end listen
 
         async def close(self) :
-            if self.conn != None :
+            if self.sock != None :
                 if ASYNC :
-                    await call_async(self.conn.close, ())
+                    await call_async(self.sock.close, ())
                 else :
-                    self.conn.close()
+                    self.sock.close()
                 #end if
-                self.conn = None
+                self.sock = None
             #end if
         #end close
 
@@ -1004,6 +1584,7 @@ class Gateway :
         if self.from_asterisk != None :
             if ASYNC :
                 await self.from_asterisk.close()
+                self.from_asterisk.terminate()
             else :
                 self.from_asterisk.close()
             #end if
@@ -1012,6 +1593,7 @@ class Gateway :
         if self.to_asterisk != None :
             if ASYNC :
                 await self.to_asterisk.close()
+                self.to_asterisk.terminate()
             else :
                 self.to_asterisk.close()
             #end if
@@ -1107,6 +1689,9 @@ def_sync_async_classes(Gateway, "Gateway", "GatewayAsync")
 #+
 # Asterisk RESTful Interface
 #-
+
+HTTP_DEFAULT_PLAINTEXT_PORT = 8088
+HTTP_DEFAULT_TLS_PORT = 8089
 
 class ARIError(Exception) :
     "just to identify HTTP error codes returned from Asterisk ARI."
@@ -1211,18 +1796,27 @@ class Stasis :
     " the request() method. Use the listen() method to create a WebSocket client" \
     " connection to listen for application events."
 
-    async def __new__(celf, host = "127.0.0.1", port = 8088, *, prefix = "/ari", username, password, debug = False) :
+    async def __new__(celf, host = "127.0.0.1", port = None, *, prefix = "/ari", username, password, ssl_context = None, debug = False) :
         # doesn’t actually need to be async, defined async just to
         # be consistent with other main API classes.
+        self = super().__new__(celf)
+        if ssl_context != None :
+            self.ssl_context = get_ssl_context(ssl_context)
+        else :
+            self.ssl_context = None
+        #end if
+        if port == None :
+            port = (HTTP_DEFAULT_PLAINTEXT_PORT, HTTP_DEFAULT_TLS_PORT)[self.ssl_context != None]
+        #end if
         if prefix != "" and not prefix.startswith("/") :
             raise ValueError("nonempty prefix must start with “/”")
         #end if
-        self = super().__new__(celf)
         self.host = host
         self.port = port
         self.prefix = prefix
         self.debug = debug
-        self.url_base = "http://%s:%d" % (self.host, self.port)
+        self.url_base = \
+            "%s://%s:%d" % (("http", "https")[self.ssl_context != None], self.host, self.port)
         self.passwd = ARIPasswordHandler(username, password)
         auth = urllib.request.HTTPBasicAuthHandler(self.passwd)
         self.opener = urllib.request.build_opener(auth)
@@ -1294,7 +1888,8 @@ class Stasis :
                     {
                         "Authorization" : self.passwd.make_basic_auth(),
                         "Content-type" : "application/json",
-                    }
+                    },
+                context = self.ssl_context
               )
             if ASYNC :
                 with await call_async(self.opener.open, (request,)) as req :
@@ -1326,26 +1921,22 @@ class Stasis :
     #end request
 
     class EventListener :
-        "wrapper for WebSocket client connection that returns decoded events." \
-        " You can use the fileno() method with select/poll to monitor for" \
-        " incoming data, then call process() to read and process the data and" \
-        " yield any decoded events."
+        "wrapper for WebSocket client connection that returns decoded events."
 
-        async def __new__(celf, parent, apps, subscribe_all, debug = False) :
+        async def __new__(celf, parent, apps, subscribe_all, *, timeout = None, debug = False) :
             self = super().__new__(celf)
             self.debug = debug
-            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.ws = wsproto.WSConnection(wsproto.ConnectionType.CLIENT)
             if ASYNC :
-                await call_async(self.sock.connect, ((parent.host, parent.port),))
-                self.sock.setblocking(False)
+                self.sock = make_socket_wrapper(parent.ssl_context, True)
+                await self.sock.connect((parent.host, parent.port))
             else :
+                self.sock = make_socket_wrapper(parent.ssl_context, False)
                 self.sock.connect((parent.host, parent.port))
             #end if
-            self.fileno = self.sock.fileno
+            self.ws = wsproto.WSConnection(wsproto.ConnectionType.CLIENT)
+            self.using_ssl = parent.ssl_context != None
             self.EOF = self.closing = False
             self.partial = ""
-            self.read_wait = False # always try first read immediately
             self.current_reading = None
             req = self.ws.send \
               (
@@ -1366,13 +1957,18 @@ class Stasis :
                   )
               )
             if ASYNC :
-                await asyncio.get_running_loop().sock_sendall(self.sock, req)
+                await self.sock.sendall(req, timeout)
             else :
-                self.sock.sendall(req)
+                self.sock.sendall(req, timeout)
             #end if
             return \
                 self
         #end __new__
+
+        def poll_register(self, poll) :
+            return \
+                self.sock.poll_register(poll)
+        #end poll_register
 
         async def wait_readable(self, timeout = None) :
             "low-level call: lets you block until further events are available" \
@@ -1381,31 +1977,13 @@ class Stasis :
             if self.EOF :
                 raise EOFError("Asterisk WebSocket wait EOF")
             #end if
-            if self.read_wait :
-                # only block if last actual read on socket indicated no data
-                # was available
-                if ASYNC :
-                    readable = (await sock_wait_async \
-                      (
-                        self.sock,
-                        recv = True,
-                        send = False,
-                        timeout = timeout
-                      ))[0]
-                else :
-                    readable = sock_wait \
-                      (
-                        self.sock,
-                        recv = True,
-                        send = False,
-                        timeout = timeout
-                      )[0]
-                #end if
+            if ASYNC :
+                readable, writable = await self.sock.io_wait(timeout)
             else :
-                readable = True
+                readable, writable = self.sock.io_wait(timeout)
             #end if
             return \
-                readable
+                readable or self.using_ssl and writable
         #end wait_readable
 
         async def process(self) :
@@ -1413,12 +1991,7 @@ class Stasis :
             " input is pending on the WebSocket connection. It will yield any" \
             " received events."
             if not self.EOF :
-                try :
-                    data = self.sock.recv(IOBUFSIZE, socket.MSG_DONTWAIT)
-                except BlockingIOError :
-                    data = None
-                #end try
-                self.read_wait = data == None
+                data = self.sock.recvimmed(IOBUFSIZE)
                 if data != None :
                     if len(data) != 0 :
                         self.ws.receive_data(data)
@@ -1426,9 +1999,6 @@ class Stasis :
                         self.EOF = True
                     #end if
                 #end if
-            #end if
-            if ASYNC :
-                loop = asyncio.get_running_loop()
             #end if
             events = iter(self.ws.events())
             while True :
@@ -1440,7 +2010,10 @@ class Stasis :
                         sys.stderr.write("connection accepted\n")
                     #end if
                 elif isinstance(event, wsevents.RejectConnection) :
-                    raise RuntimeError("WebSockets connection rejected: code %d" % event.status_code)
+                    raise RuntimeError \
+                      (
+                        "WebSockets connection rejected: code %d" % event.status_code
+                      )
                 elif isinstance(event, wsevents.CloseConnection) :
                     if self.debug :
                         sys.stderr.write("connection closing\n")
@@ -1448,14 +2021,14 @@ class Stasis :
                     if not self.closing :
                         self.closing = True
                         if ASYNC :
-                            await loop.sock_sendall(self.sock, self.ws.send(event.response()))
+                            await self.sock.sendall(self.sock, self.ws.send(event.response()))
                         else :
                             self.sock.sendall(self.sock, self.ws.send(event.response()))
                         #end if
                     #end if
                 elif isinstance(event, wsevents.Ping) :
                     if ASYNC :
-                        await loop.sock_sendall(self.ws.send(event.response()))
+                        await self.sock.sendall(self.ws.send(event.response()))
                     else :
                         self.sock.sendall(self.ws.send(event.response()))
                     #end if
@@ -1471,7 +2044,12 @@ class Stasis :
                     #end if
                     yield result
                 else :
-                    raise RuntimeError("unexpected WebSocket event %s -- %s" % (type(event).__name__, repr(event)))
+                    raise RuntimeError \
+                      (
+                            "unexpected WebSocket event %s -- %s"
+                        %
+                            (type(event).__name__, repr(event))
+                      )
                 #end if
             #end while
         #end process
@@ -1481,6 +2059,11 @@ class Stasis :
             " if necessary. Returns None on timeout if timeout was specified," \
             " else waits indefinitely."
             assert not self.closing
+            if timeout != None :
+                deadline = time.monotonic() + timeout
+            else :
+                deadline = None
+            #end if
             while True :
                 if self.current_reading != None :
                     if ASYNC :
@@ -1501,6 +2084,16 @@ class Stasis :
                 if self.EOF :
                     raise EOFError("Asterisk WebSocket connection EOF")
                 #end if
+                if deadline != None :
+                    now = time.monotonic()
+                    if now > deadline :
+                        timed_out = True
+                        break
+                    #end if
+                    timeout = deadline - now
+                else :
+                    timeout = None
+                #end if
                 if ASYNC :
                     readable = await self.wait_readable(timeout)
                 else :
@@ -1511,7 +2104,28 @@ class Stasis :
                     evt = None
                     break
                 #end if
-                self.current_reading = self.process()
+                if deadline != None :
+                    data = self.sock.recvimmed(IOBUFSIZE)
+                    if data == None and (not self.using_ssl or time.monotonic() > deadline) :
+                        # timeout, but give SSL a chance to keep reporting want-more exceptions.
+                        evt = None
+                        break
+                    #end if
+                else :
+                    if ASYNC :
+                        data = await self.sock.recv(IOBUFSIZE)
+                    else :
+                        data = self.sock.recv(IOBUFSIZE)
+                    #end if
+                #end if
+                if data != None :
+                    if len(data) != 0 :
+                        self.ws.receive_data(data)
+                    else :
+                        self.EOF = True
+                    #end if
+                    self.current_reading = self.process()
+                #end if
             #end while
             return \
                 evt
@@ -1520,6 +2134,7 @@ class Stasis :
         async def close(self) :
             if self.sock != None :
                 if self.current_reading != None :
+                    # gobble pending WebSocket messages
                     if ASYNC :
                         while True :
                             try :
@@ -1536,14 +2151,11 @@ class Stasis :
                 #end if
                 if not self.closing :
                     self.closing = True
+                    msg = self.ws.send(wsevents.CloseConnection(1000, "bye-bye"))
                     if ASYNC :
-                        await asyncio.get_running_loop().sock_sendall \
-                          (
-                            self.sock,
-                            self.ws.send(wsevents.CloseConnection(1000, "bye-bye"))
-                          )
+                        await self.sock.sendall(msg)
                     else :
-                        self.sock.sendall(self.ws.send(wsevents.CloseConnection(1000, "bye-bye")))
+                        self.sock.sendall(msg)
                     #end if
                 #end if
                 if ASYNC :
@@ -1555,7 +2167,11 @@ class Stasis :
                         pass
                     #end for
                 #end if
-                self.sock.close()
+                if ASYNC :
+                    await self.sock.close()
+                else :
+                    self.sock.close()
+                #end if
                 self.sock = None
             #end if
         #end close
@@ -1608,13 +2224,13 @@ class Console :
               # So that caller can change value of global before
               # instantiating this class, if they wish.
         #end if
-        conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         if ASYNC :
-            await call_async(conn.connect, (socket_path,))
+            await call_async(sock.connect, (socket_path,))
         else :
-            conn.connect(socket_path)
+            sock.connect(socket_path)
         #end if
-        self.conn = conn
+        self.sock = sock
         self.to_send = b""
         self.received = b""
         self.EOF = False
@@ -1648,16 +2264,12 @@ class Console :
     def process(self, recv = True, send = True) :
         "low-level call: receives any pending data from Asterisk (if recv)" \
         " and also sends it any pending commands from us (if send). You can" \
-        " invoke this from your event loop when monitoring of the conn" \
-        " socket indicates that something is ready to be received or sent."
+        " invoke this from your event loop when monitoring of the socket" \
+        " indicates that something is ready to be received or sent."
         received_something = sent_something = False
         if recv :
             while not self.EOF :
-                try :
-                    data = self.conn.recv(IOBUFSIZE, socket.MSG_DONTWAIT)
-                except BlockingIOError :
-                    data = None
-                #end try
+                data = self.sock.recvimmed(IOBUFSIZE)
                 if data == None :
                     break
                 received_something = True # even if it’s only the EOF indication
@@ -1672,11 +2284,7 @@ class Console :
             while True :
                 if len(self.to_send) == 0 :
                     break
-                try :
-                    sent = self.conn.send(self.to_send, socket.MSG_DONTWAIT)
-                except BlockingIOError :
-                    sent = 0
-                #end try
+                sent = self.sock.sendimmed(self.to_send)
                 if sent == 0 :
                     break
                 sent_something = True
@@ -1695,7 +2303,7 @@ class Console :
             if ASYNC :
                 recv, send = await sock_wait_async \
                   (
-                    sock = self.conn,
+                    sock = self.sock,
                     recv = True,
                     send = len(self.to_send) != 0,
                     timeout = timeout
@@ -1703,7 +2311,7 @@ class Console :
             else :
                 recv, send = sock_wait \
                   (
-                    sock = self.conn,
+                    sock = self.sock,
                     recv = True,
                     send = len(self.to_send) != 0,
                     timeout = timeout
@@ -1762,7 +2370,7 @@ class Console :
             if ASYNC :
                 recv, send = await sock_wait_async \
                   (
-                    sock = self.conn,
+                    sock = self.sock,
                     recv = True,
                     send = len(self.to_send) != 0,
                     timeout = timeout
@@ -1770,7 +2378,7 @@ class Console :
             else :
                 recv, send = sock_wait \
                   (
-                    sock = self.conn,
+                    sock = self.sock,
                     recv = True,
                     send = len(self.to_send) != 0,
                     timeout = timeout
@@ -1788,13 +2396,13 @@ class Console :
     #end get_response
 
     async def close(self) :
-        if self.conn != None :
+        if self.sock != None :
             if ASYNC :
-                await call_async(self.conn.close, ())
+                await call_async(self.sock.close, ())
             else :
-                self.conn.close()
+                self.sock.close()
             #end if
-            self.conn = None
+            self.sock = None
         #end if
     #end close
 

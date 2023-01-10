@@ -32,7 +32,7 @@ import threading
 import queue
 import base64
 import urllib.parse
-import urllib.request
+import http.client
 import json
 import inspect
 import ast
@@ -1661,15 +1661,19 @@ HTTP_DEFAULT_TLS_PORT = 8089
 class ARIError(Exception) :
     "just to identify HTTP error codes returned from Asterisk ARI."
 
-    def __init__(self, code, reason, headers) :
-        self.code = code
-        self.reason = reason
-        self.headers = headers
+    def __init__(self, errno, msg) :
+        self.errno = errno # integer or None
+        self.msg = msg
     #end __init__
 
     def __str__(self) :
+        if self.errno != None :
+            result = "ARI Error %d: %s" % (self.errno, self.msg)
+        else :
+            result = "ARI Error: %s" % self.msg
+        #end if
         return \
-            "ARI Error %d: %s" % (self.code, self.reason)
+            result
     #end __str__
 
 #end ARIError
@@ -1699,46 +1703,14 @@ class RESTMETHOD(enum.Enum) :
 
 #end RESTMETHOD
 
-class ARIPasswordHandler(urllib.request.BaseHandler) :
-    "password handler which only holds a single username/password pair" \
-    " for the expected Asterisk realm."
+class ARIPasswordHandler :
+    "only holds a single username/password pair for the expected Asterisk realm."
 
     def __init__(self, username, password) :
         self.realm = "Asterisk REST Interface"
         self.username = username
         self.password = password
-        self.authenticated = False
     #end __init__
-
-    def add_password(self, realm, uri, user, passwd, is_authenticated = False) :
-        raise NotImplementedError("cannot add new passwords")
-    #end add_password
-
-    def find_user_password(self, realm, authuri) :
-        if realm == self.realm :
-            result = (self.username, self.password)
-        else :
-            result = (None, None)
-        #end if
-        return \
-            result
-    #end find_user_password
-
-    # As far as I can tell, the urllib.request code is supposed to
-    # notice the existence of the following methods, and automatically
-    # generate an “Authorization” header line on the initial request,
-    # instead of waiting for a “401 Unauthorized” response before
-    # trying again. But looking at the traffic, this doesn’t seem to
-    # work.
-
-    def update_authenticated(self, uri, is_authenticated) :
-        self.authenticated = is_authenticated
-    #end update_authenticated
-
-    def is_authenticated(self, authuri) :
-        return \
-            self.authenticated
-    #end is_authenticated
 
     def make_basic_auth(self) :
         "generate the contents of the “Authorization” header line myself."
@@ -1761,7 +1733,7 @@ class Stasis :
     " the request() method. Use the listen() method to create a WebSocket client" \
     " connection to listen for application events."
 
-    async def __new__(celf, host = "127.0.0.1", port = None, *, prefix = "/ari", username, password, ssl_context = None, debug = False) :
+    async def __new__(celf, host = "127.0.0.1", port = None, *, prefix = "/ari", username, password, ssl_context = None, timeout = None, debug = False) :
         # doesn’t actually need to be async, defined async just to
         # be consistent with other main API classes.
         self = super().__new__(celf)
@@ -1782,9 +1754,28 @@ class Stasis :
         self.debug = debug
         self.url_base = \
             "%s://%s:%d" % (("http", "https")[self.ssl_context != None], self.host, self.port)
+        # Use http.client instead of urllib.request so that I can ask for
+        # persistent connections.
+        if self.ssl_context != None :
+            self.http = http.client.HTTPSConnection \
+              (
+                host = self.host,
+                port = self.port,
+                context = self.ssl_context,
+                timeout = timeout
+              )
+        else :
+            self.http = http.client.HTTPConnection \
+              (
+                host = self.host,
+                port = self.port,
+                timeout = timeout
+              )
+        #end if
+        if self.debug :
+            self.http.set_debuglevel(9)
+        #end if
         self.passwd = ARIPasswordHandler(username, password)
-        auth = urllib.request.HTTPBasicAuthHandler(self.passwd)
-        self.opener = urllib.request.build_opener(auth)
         return \
             self
     #end __new__
@@ -1823,7 +1814,7 @@ class Stasis :
         else :
             paramsstr = ""
         #end if
-        url = self.url_base + self.prefix + path + ("", "?")[paramsstr != ""] + paramsstr
+        url = self.prefix + path + ("", "?")[paramsstr != ""] + paramsstr
         if self.debug :
             sys.stderr.write("ARI request URL = %s\n" % url)
         #end if
@@ -1838,52 +1829,122 @@ class Stasis :
             if self.debug :
                 sys.stderr.write("ARI data = %s\n" % repr(data))
             #end if
-            if method != RESTMETHOD.POST :
+            if data != b"" and method != RESTMETHOD.POST :
                 raise ValueError("request body only allowed for POST")
             #end if
+        else :
+            data = b""
         #end if
         fail = None
         try :
-            request = urllib.request.Request \
-              (
-                url,
-                data = data,
-                method = method.methodstr,
-                headers =
-                    {
-                        "Authorization" : self.passwd.make_basic_auth(),
-                        "Content-type" : "application/json",
-                    },
-                context = self.ssl_context
-              )
+            # Managing requests via an http.client.HTTP{,S}Connection object
+            # is a bit fiddly. For some reason I couldn’t get the higher-level
+            # request() method to actually communicate with the server, so I
+            # use the lower-level putrequest()/putheader()/etc methods instead.
+            # And there is no autoreconnect facility if the persistent connection
+            # gets timed out by the other side. So I have to go through the
+            # whole sequence of putting headers and body, only to catch it if it
+            # fails with a BrokenPipeError on the final send() call, whereupon
+            # I have to reconnect before trying again.
+            headers = \
+                {
+                    "Authorization" : self.passwd.make_basic_auth(),
+                    "Content-type" : "application/json",
+                    "Connection" : "Keep-Alive",
+                    "Content-length" : "%d" % len(data),
+                }
+            repeated = False
             if ASYNC :
-                with await call_async(self.opener.open, (request,)) as req :
-                    resp = await call_async(req.read, ())
-                #end with
+                while True :
+                    try :
+                        # do all these async, to avoid assuming anything about
+                        # when actual communication with server happens
+                        await call_async(self.http.putrequest, (method.methodstr, url))
+                        for key in sorted(headers.keys()) :
+                            await call_async(self.http.putheader, (key, headers[key]))
+                        #end for
+                        await call_async(self.http.endheaders, ())
+                        await call_async(self.http.send, (data,))
+                        resp = await call_async(self.http.getresponse, ())
+                    except (BrokenPipeError, http.client.RemoteDisconnected) :
+                        if repeated :
+                            raise # only retry once
+                        # need to close, reconnect and start again
+                        if self.debug :
+                            sys.stderr.write("auto-reopening HTTP connection\n")
+                        #end if
+                        await call_async(self.http.close, ()) # force a reconnect
+                        repeated = True
+                    else :
+                        break
+                    #end try
+                #end while
             else :
-                with self.opener.open(request) as req :
-                    resp = req.read()
-                #end with
+                while True :
+                    try :
+                        self.http.putrequest(method.methodstr, url)
+                        for key in sorted(headers.keys()) :
+                            self.http.putheader(key, headers[key])
+                        #end for
+                        self.http.endheaders()
+                        self.http.send(data)
+                        resp = self.http.getresponse()
+                    except (BrokenPipeError, http.client.RemoteDisconnected) :
+                        if repeated :
+                            raise # only retry once
+                        # need to close, reconnect and start again
+                        if self.debug :
+                            sys.stderr.write("auto-reopening HTTP connection\n")
+                        #end if
+                        self.http.close() # force a reconnect
+                        repeated = True
+                    else :
+                        break
+                    #end try
+                #end while
             #end if
-        except urllib.error.HTTPError as reqfail :
-            # replace with my own exception object just so I don’t get those
-            # long tracebacks from the depths of urllib.
-            fail = ARIError(reqfail.code, reqfail.reason, reqfail.headers)
+        # Replace exceptions with my own exception object just so I don’t
+        # get those long tracebacks from the depths of http.client or
+        # elsewhere.
+        except http.client.HTTPException as reqfail:
+            fail = ARIError(None, repr(reqfail))
+        except ConnectionError as reqfail :
+            fail = ARIError(reqfail.errno, reqfail.strerror)
+        except TimeoutError :
+            fail = ARIError(None, "server taking too long to respond")
         #end try
         if fail != None :
             raise fail
         #end if
-        if self.debug :
-            sys.stderr.write("raw resp = %s\n" % repr(resp))
+        resptype = resp.getheader("content-type")
+        respdata = resp.read()
+        if resptype != "application/json" :
+            raise ARIError(None, "unexpected content type %s data %s" % (resptype, repr(respdata)))
         #end if
-        if resp != b"" :
-            result = json.loads(resp)
+        if self.debug :
+            sys.stderr.write("Stasis resp headers = %s\n" % repr(resp.getheaders()))
+            sys.stderr.write("Stasis raw resp = %s\n" % repr(respdata))
+        #end if
+        if respdata != b"" :
+            result = json.loads(respdata)
         else :
             result = None
         #end if
         return \
             result
     #end request
+
+    async def close(self) :
+        if self.http != None :
+            conn = self.http
+            self.http = None # stop further async calls
+            if ASYNC :
+                await call_async(conn.close, ())
+            else :
+                conn.close()
+            #end if
+        #end if
+    #end close
 
     class EventListener :
         "wrapper for WebSocket client connection that returns decoded events."
@@ -2027,6 +2088,7 @@ class Stasis :
             deadline = AbsoluteTimeout(timeout)
             while True :
                 if self.current_reading != None :
+                    # continuing to process data previously received
                     if ASYNC :
                         # evt = await anext(self.current_reading, None)
                           # only available in Python 3.10 or later
@@ -2045,6 +2107,7 @@ class Stasis :
                 if self.EOF :
                     raise EOFError("Asterisk WebSocket connection EOF")
                 #end if
+                # try to get some more data
                 if ASYNC :
                     readable = await self.wait_readable(deadline.timeout)
                 else :

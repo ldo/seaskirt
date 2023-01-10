@@ -5,11 +5,12 @@ also need the
 [`python3-wsproto`](https://packages.debian.org/bullseye/python3-wsproto)
 package installed.
 
-I first put this module together about a decade and a half ago, when I
-was just learning about Asterisk and Python. Then more recently I
-dusted it off, and updated it for Python 3 and more recent Asterisk
-versions (specifically, tested with Asterisk 16 and Asterisk 20),
-adding very basic support for Asterisk’s newer ARI protocol.
+I first put a predecessor of this module together about a decade and a
+half ago, when I was just learning about Asterisk and Python. Then
+more recently I dusted it off, and updated it for Python 3 and more
+recent Asterisk versions (specifically, tested with Asterisk 16 and
+Asterisk 20), adding very basic support for Asterisk’s newer ARI
+protocol, and more recently the option for TLS encryption as well.
 
 I know there are more elaborate alternatives available elsewhere (see
 the list below), but I thought I would keep this one simple. For
@@ -211,6 +212,42 @@ match that `ActionID` value (or which do not have an ActionID parameter).
 At least things are a bit simpler with ARI.
 
 
+SSL/TLS Support
+===============
+
+Asterisk supports SSL/TLS encryption for both AMI and ARI connections.
+The AMI setup is done in `manager.conf`, while ARI uses the common
+HTTP setup in `http.conf`. In each case, you specify a certificate and
+corresponding key that Asterisk will use to authenticate to the client
+and set up a secure, encrypted connection. The client then
+authenticates to Asterisk via the same username/password mechanism
+used over unencrypted connections.
+
+For both interfaces, encrypted connections are made over different
+ports than unencrypted ones. This allows you to disable the
+unencrypted ports and force all connections to be made over TLS.
+
+Typically there is no need for your private Asterisk management
+interfaces to authenticate themselves to the general public, but only
+to authorized client applications that you control. Thus, you will use
+certificates and keys you generate yourself, using your own private
+Certificate Authority (CA) with its own self-signed certificate. This
+CA certificate will in turn need to be supplied (over some trusted
+channel) to client programs so they can verify the authenticity of
+your server. In Seaskirt, the `Manager`, `ManagerAsync`, `Stasis` and
+`StasisAsync` class constructors take an optional `ssl_context`
+argument, which will be used to authenticate the server’s certificate.
+The value for this argument can take the following forms:
+
+  * The path to a CA certificate file
+  * The path to a directory containing CA certificates
+  * An [SSL context](https://docs.python.org/3/library/ssl.html)
+    object, preconfigured with whatever options you need.
+
+If this is omitted, then the connection becomes a regular unencrypted
+one.
+
+
 The State Of Python Wrappers
 ============================
 
@@ -225,14 +262,14 @@ projects seem moribund.
 
 The following table summarizes the state of other Python wrappers
 that I’m aware of, listing which Asterisk APIs they support and whether
-they work with `asyncio`.
+they work with `asyncio` and offer TLS encryption.
 
-| Name | AMI | AGI | ARI | `asyncio` |
-|----------|-----|----------|-----|------------|
-| [`pyst2`](https://github.com/jfernandz/pyst2) | yes | yes | no | no (uses threads) |
-| [`py-asterisk`](https://github.com/jeansch/py-asterisk) | yes | no | no | no |
-| [`panoramisk`](https://github.com/gawel/panoramisk/) | yes | FastAGI only | no | yes |
-| [`asyncari`](https://github.com/M-o-a-T/asyncari/) | no | no | yes | via [`anyio`](https://github.com/agronholm/anyio) |
+| Name | AMI | AGI | ARI | `asyncio` | TLS |
+|----------|-----|----------|-----|-------------|-----|
+| [`pyst2`](https://github.com/jfernandz/pyst2) | yes | yes | no | no (uses threads) | no |
+| [`py-asterisk`](https://github.com/jeansch/py-asterisk) | yes | no | no | no | no |
+| [`panoramisk`](https://github.com/gawel/panoramisk/) | yes | FastAGI only | no | yes | no |
+| [`asyncari`](https://github.com/M-o-a-T/asyncari/) | no | no | yes | via [`anyio`](https://github.com/agronholm/anyio) | no |
 
 Lawrence D'Oliveiro <ldo@geek-central.gen.nz>
-2022 December 15
+2023 January 10

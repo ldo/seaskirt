@@ -444,28 +444,6 @@ class AsyncFile(AsyncProcessor) :
 
 #end AsyncFile
 
-class AsyncSocket(AsyncProcessor) :
-    "AsyncProcessor subclass for wrapping Python socket objects. This is mainly" \
-    " needed because the asyncio non-blocking socket calls don’t work on SSLSocket" \
-    " objects."
-    # not used anywhere: delete.
-
-    def __init__(self, sock) :
-        super().__init__ \
-          (
-            sock,
-            [ # list all the calls I actually use
-                ("connect", 1),
-                ("recv", 1), # no flags arg allowed for SSLSocket
-                ("sendall", 1),
-                ("shutdown", 1),
-                ("close", 0),
-            ]
-          )
-    #end __init__
-
-#end AsyncSocket
-
 class SOCK_NEED(enum.Enum) :
     "need to wait for socket to allow I/O of this type before further" \
     " communication can proceed."

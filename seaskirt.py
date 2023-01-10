@@ -1787,7 +1787,7 @@ class Stasis :
         self.opener = urllib.request.build_opener(auth)
         return \
             self
-    #end __init__
+    #end __new__
 
     async def request(self, method, path, params, data = None) :
         "initiates a request to the specified path with the specified params and" \

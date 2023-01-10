@@ -576,6 +576,35 @@ async def sock_wait_async(sock, recv, send, timeout = None) :
         (receiving, sending)
 #end sock_wait_async
 
+class AbsoluteTimeout :
+    "given a relative timeout in seconds from the time of" \
+    " instantiation, produces any number of successive relative" \
+    " timeouts that always end at the same absolute time. This way," \
+    " the timeout applies to a complete sequence of operations being" \
+    " performed. If the given timeout is None, then returned relative" \
+    " timeouts are also None."
+
+    def __init__(self, timeout) :
+        if timeout != None :
+            self.deadline = time.monotonic() + timeout
+        else :
+            self.deadline = None
+        #end if
+    #end __init__
+
+    @property
+    def timeout(self) :
+        if self.deadline != None :
+            result = max(self.deadline - time.monotonic(), 0)
+        else :
+            result = None
+        #end if
+        return \
+            result
+    #end timeout
+
+#end AbsoluteTimeout
+
 #+
 # Socket wrapper classes. These try to offer as uniform
 # an abstraction as possible that covers both encrypted
@@ -676,11 +705,7 @@ class SocketWrapper :
 
     async def recv(self, nrbytes, timeout = None) :
         self.sock_need = SOCK_NEED.NOTHING
-        if timeout != None :
-            deadline = time.monotonic() + timeout
-        else :
-            deadline = None
-        #end if
+        deadline = AbsoluteTimeout(timeout)
         while True :
             try :
                 got = self.sock.recv(nrbytes, socket.MSG_DONTWAIT)
@@ -691,24 +716,14 @@ class SocketWrapper :
                 timed_out = False
                 break
             #end if
-            if timeout == 0 :
+            if deadline.timeout == 0 :
                 timed_out = True
                 break
             #end if
-            if deadline != None :
-                now = time.monotonic()
-                if now > deadline :
-                    timed_out = True
-                    break
-                #end if
-                timeout = deadline - now
-            else :
-                timeout = None
-            #end if
             if ASYNC :
-                recv = (await sock_wait_async(self.sock, True, False, timeout))[0]
+                recv = (await sock_wait_async(self.sock, True, False, deadline.timeout))[0]
             else :
-                recv = sock_wait(self.sock, True, False, timeout)[0]
+                recv = sock_wait(self.sock, True, False, deadline.timeout)[0]
             #end if
             if not recv :
                 timed_out = True
@@ -736,11 +751,7 @@ class SocketWrapper :
 
     async def sendall(self, data, timeout = None) :
         self.sock_need = SOCK_NEED.NOTHING
-        if timeout != None :
-            deadline = time.monotonic() + timeout
-        else :
-            deadline = None
-        #end if
+        deadline = AbsoluteTimeout(timeout)
         while True :
             try :
                 sent = self.sock.send(data, socket.MSG_DONTWAIT)
@@ -752,20 +763,10 @@ class SocketWrapper :
                 timed_out = False
                 break
             #end if
-            if deadline != None :
-                now = time.monotonic()
-                if now > deadline :
-                    timed_out = True
-                    break
-                #end if
-                timeout = deadline - now
-            else :
-                timeout = None
-            #end if
             if ASYNC :
-                send = (await sock_wait_async(self.sock, False, True, timeout))[1]
+                send = (await sock_wait_async(self.sock, False, True, deadline.timeout))[1]
             else :
-                send = sock_wait(self.sock, False, True, timeout)[1]
+                send = sock_wait(self.sock, False, True, deadline.timeout)[1]
             #end if
             if not send :
                 timed_out = True
@@ -863,11 +864,7 @@ class SSLSocketWrapper :
     async def _do_io(self, opname, meth, args, timeout, signal_timeout = True) :
         self.sock_need = SOCK_NEED.NOTHING
         DoAgain = type(self).DoAgain
-        if timeout != None :
-            deadline = time.monotonic() + timeout
-        else :
-            deadline = None
-        #end if
+        deadline = AbsoluteTimeout(timeout)
         if ASYNC :
             my_wait_avail = asyncio.get_running_loop().create_future()
             if self.wait_avail != None :
@@ -897,16 +894,6 @@ class SSLSocketWrapper :
                     timed_out = False
                     break
                 #end if
-                if deadline != None :
-                    now = time.monotonic()
-                    if now > deadline :
-                        timed_out = True
-                        break
-                    #end if
-                    timeout = deadline - now
-                else :
-                    timeout = None
-                #end if
                 if sock_need != None :
                     if ASYNC :
                         recv, send = await sock_wait_async \
@@ -914,7 +901,7 @@ class SSLSocketWrapper :
                             self.sock.fileno(),
                             recv = sock_need == SOCK_NEED.READABLE,
                             send = sock_need == SOCK_NEED.WRITABLE,
-                            timeout = timeout
+                            timeout = deadline.timeout
                           )
                     else :
                         recv, send = sock_wait \
@@ -922,7 +909,7 @@ class SSLSocketWrapper :
                             self.sock.fileno(),
                             recv = sock_need == SOCK_NEED.READABLE,
                             send = sock_need == SOCK_NEED.WRITABLE,
-                            timeout = timeout
+                            timeout = deadline.timeout
                           )
                     #end if
                     if not (recv or send) :
@@ -2059,11 +2046,7 @@ class Stasis :
             " if necessary. Returns None on timeout if timeout was specified," \
             " else waits indefinitely."
             assert not self.closing
-            if timeout != None :
-                deadline = time.monotonic() + timeout
-            else :
-                deadline = None
-            #end if
+            deadline = AbsoluteTimeout(timeout)
             while True :
                 if self.current_reading != None :
                     if ASYNC :
@@ -2084,29 +2067,19 @@ class Stasis :
                 if self.EOF :
                     raise EOFError("Asterisk WebSocket connection EOF")
                 #end if
-                if deadline != None :
-                    now = time.monotonic()
-                    if now > deadline :
-                        timed_out = True
-                        break
-                    #end if
-                    timeout = deadline - now
-                else :
-                    timeout = None
-                #end if
                 if ASYNC :
-                    readable = await self.wait_readable(timeout)
+                    readable = await self.wait_readable(deadline.timeout)
                 else :
-                    readable = self.wait_readable(timeout)
+                    readable = self.wait_readable(deadline.timeout)
                 #end if
                 if not readable :
                     # timeout
                     evt = None
                     break
                 #end if
-                if deadline != None :
+                if deadline.deadline != None :
                     data = self.sock.recvimmed(IOBUFSIZE)
-                    if data == None and (not self.using_ssl or time.monotonic() > deadline) :
+                    if data == None and (not self.using_ssl or time.monotonic() > deadline.deadline) :
                         # timeout, but give SSL a chance to keep reporting want-more exceptions.
                         evt = None
                         break

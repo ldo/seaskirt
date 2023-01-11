@@ -1945,8 +1945,8 @@ class Stasis :
         #end if
         resptype = resp.getheader("content-type")
         respdata = resp.read()
-        if resptype != "application/json" :
-            raise ARIError(None, "unexpected content type %s data %s" % (resptype, repr(respdata)))
+        if len(respdata) != 0 and resptype != "application/json" :
+            raise ARIError(None, "unexpected nonempty content type %s data %s" % (resptype, repr(respdata)))
         #end if
         if self.debug :
             sys.stderr.write("Stasis resp headers = %s\n" % repr(resp.getheaders()))

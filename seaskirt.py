@@ -1894,39 +1894,25 @@ class Stasis :
                 return \
                     resp
             #end do_request
-            if ASYNC :
-                while True :
-                    try :
+            while True :
+                try :
+                    if ASYNC :
                         resp = await self.requests.request(do_request, (repeated,))
-                    except (BrokenPipeError, http.client.RemoteDisconnected) :
-                        if repeated :
-                            raise # only retry once
-                        # need to close, reconnect and start again
-                        if self.debug :
-                            sys.stderr.write("auto-reopening HTTP connection\n")
-                        #end if
-                        repeated = True
                     else :
-                        break
-                    #end try
-                #end while
-            else :
-                while True :
-                    try :
                         resp = do_request(repeated)
-                    except (BrokenPipeError, http.client.RemoteDisconnected) :
-                        if repeated :
-                            raise # only retry once
-                        # need to close, reconnect and start again
-                        if self.debug :
-                            sys.stderr.write("auto-reopening HTTP connection\n")
-                        #end if
-                        repeated = True
-                    else :
-                        break
-                    #end try
-                #end while
-            #end if
+                    #end if
+                except (BrokenPipeError, http.client.RemoteDisconnected) :
+                    if repeated :
+                        raise # only retry once per request
+                    # need to close, reconnect and start again
+                    if self.debug :
+                        sys.stderr.write("auto-reopening HTTP connection\n")
+                    #end if
+                    repeated = True
+                else :
+                    break
+                #end try
+            #end while
         # Replace exceptions with my own exception object just so I don’t
         # get those long tracebacks from the depths of http.client or
         # elsewhere.

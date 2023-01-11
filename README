@@ -30,7 +30,8 @@ tracebacks report incorrect source lines. These main classes are:
     class also provides a `listener()` classmethod, for accepting
     connections via FastAGI.
   * `Stasis`/`StasisAsync`, for handling ARI connections (including
-    listening for events via WebSockets).
+    listening for events via WebSockets), while trying to reuse the
+    same HTTP connection for multiple successive requests.
   * `Console`/`ConsoleAsync`, for connecting to the Asterisk console.
 
 I haven’t done much documentation for this (besides what’s in the source
@@ -272,4 +273,4 @@ they work with `asyncio` and offer TLS encryption.
 | [`asyncari`](https://github.com/M-o-a-T/asyncari/) | no | no | yes | via [`anyio`](https://github.com/agronholm/anyio) | no |
 
 Lawrence D'Oliveiro <ldo@geek-central.gen.nz>
-2023 January 10
+2023 January 11

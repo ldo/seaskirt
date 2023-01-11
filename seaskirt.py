@@ -1883,7 +1883,10 @@ class Stasis :
                     "Content-length" : "%d" % len(data),
                 }
             repeated = False
-            def do_request() :
+            def do_request(reconnect) :
+                if reconnect :
+                    self.http.close() # force a reconnect
+                #end if
                 self.http.putrequest(method.methodstr, url)
                 for key in sorted(headers.keys()) :
                     self.http.putheader(key, headers[key])
@@ -1897,7 +1900,7 @@ class Stasis :
             if ASYNC :
                 while True :
                     try :
-                        resp = await self.requests.request(do_request, ())
+                        resp = await self.requests.request(do_request, (repeated,))
                     except (BrokenPipeError, http.client.RemoteDisconnected) :
                         if repeated :
                             raise # only retry once
@@ -1905,7 +1908,6 @@ class Stasis :
                         if self.debug :
                             sys.stderr.write("auto-reopening HTTP connection\n")
                         #end if
-                        await call_async(self.http.close, ()) # force a reconnect
                         repeated = True
                     else :
                         break
@@ -1914,7 +1916,7 @@ class Stasis :
             else :
                 while True :
                     try :
-                        resp = do_request()
+                        resp = do_request(repeated)
                     except (BrokenPipeError, http.client.RemoteDisconnected) :
                         if repeated :
                             raise # only retry once
@@ -1922,7 +1924,6 @@ class Stasis :
                         if self.debug :
                             sys.stderr.write("auto-reopening HTTP connection\n")
                         #end if
-                        self.http.close() # force a reconnect
                         repeated = True
                     else :
                         break

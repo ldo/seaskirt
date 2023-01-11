@@ -289,10 +289,7 @@ class RequestQueue :
 
     def __init__(self) :
         self.loop = asyncio.get_running_loop()
-        self.queue = queue.Queue(maxsize = 1)
-          # Minimum finite value I can set. I wonder why a maxsize of 0
-          # doesn’t mean 0: putting a request on the queue would block
-          # until the processor is ready to retrieve it.
+        self.queue = queue.Queue()
         self.runner = None # only started on demand
         self.stopping = False
     #end __init__

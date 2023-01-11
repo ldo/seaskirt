@@ -283,84 +283,19 @@ def call_async(func, funcargs = (), timeout = None, abort = None, loop = None) :
         awaiting
 #end call_async
 
-class AsyncProcessor :
-    "wrapper around Python I/O-related objects which makes all (relevant) calls" \
-    " asynchronous by passing them off to a dedicated request-runner thread."
+class RequestQueue :
+    "for making blocking requests nonblocking by passing them off to a worker" \
+    " thread."
 
-    def __init__(self, io_obj, funcdefs) :
-
-        def def_queue_request(name, nrargs) :
-            # defines an async wrapper around the given method of io_obj
-            # as a method of this class with the same name.
-
-            Request = type(self).Request
-            io_meth = getattr(io_obj, name)
-
-            async def reqfunc(*args) :
-                if len(args) != nrargs :
-                    raise TypeError \
-                      (
-                            "%s.%s expects %d args, not %d"
-                        %
-                            (type(io_obj).__name__, name, nrargs, len(args))
-                      )
-                #end if
-                return \
-                    await Request(self, io_meth, args)
-            #end reqfunc
-
-        #begin def_queue_request
-            reqfunc.__name__ = name
-            setattr(self, name, reqfunc)
-        #end def_queue_request
-
-    #begin __init__
-        if (
-                not isinstance(funcdefs, (list, tuple))
-            or
-                not all
-                  (
-                        isinstance(name, str)
-                    and
-                        not name.startswith("_")
-                    and
-                        name not in
-                            {
-                                "fileno", "do_run", "io_obj", "Request",
-                                "requests", "runner", "stopping", "terminate",
-                            }
-                          # attributes of base class
-                    and
-                        isinstance(nrargs, int)
-                    and
-                        nrargs >= 0
-                    for name, nrargs in funcdefs
-                  )
-        ) :
-            raise TypeError("funcdefs must be sequence of («name», «nrargs») pairs")
-        #end if
-        for name, nrargs in funcdefs :
-            def_queue_request(name, nrargs)
-        #end for
-        self.io_obj = io_obj
-        self.requests = queue.Queue(maxsize = 1)
+    def __init__(self) :
+        self.loop = asyncio.get_running_loop()
+        self.queue = queue.Queue(maxsize = 1)
           # Minimum finite value I can set. I wonder why a maxsize of 0
           # doesn’t mean 0: putting a request on the queue would block
           # until the processor is ready to retrieve it.
+        self.runner = None # only started on demand
         self.stopping = False
-        self.runner = threading.Thread \
-          (
-            target = self.do_run,
-            args = (self.requests,),
-            daemon = True
-          )
-        self.runner.start()
     #end __init__
-
-    def fileno(self) :
-        return \
-            self.io_obj.fileno()
-    #end fileno
 
     class Request :
         "represents an I/O request to be executed by the request-runner" \
@@ -369,11 +304,21 @@ class AsyncProcessor :
 
         def __init__(self, parent, fn, fnargs) :
             # fills out the Request and puts it on the thread queue.
-            self.loop = asyncio.get_running_loop()
+            if parent.stopping :
+                raise asyncio.InvalidStateError("queue is stopping--no new requests")
+            #end if
             self.fn = fn
             self.fnargs = fnargs
-            self.notify_done = self.loop.create_future()
-            parent.requests.put(self)
+            self.notify_done = parent.loop.create_future()
+            parent.queue.put(self)
+            if parent.runner == None :
+                parent.runner = threading.Thread \
+                  (
+                    target = parent._do_run,
+                    daemon = True
+                  )
+                parent.runner.start()
+            #end if
         #end __init__
 
         def __await__(self) :
@@ -393,34 +338,113 @@ class AsyncProcessor :
 
     #end Request
 
-    @staticmethod
-    def do_run(requests) :
+    def request(self, fn, fnargs) :
+        return \
+            type(self).Request(self, fn, fnargs)
+    #end request
+
+    def _do_run(self) :
         # processes actual I/O requests on a separate thread.
         # A “None” queue element is treated as a request to terminate.
         while True :
-            elt = requests.get()
+            elt = self.queue.get()
             if elt == None :
-                requests.task_done()
+                self.queue.task_done()
                 break
             #end if
-            fail = None
             try :
                 res = elt.fn(*elt.fnargs)
             except Exception as err :
                 fail = err
                 res = None
+            else :
+                fail = None
             #end try
-            elt.loop.call_soon_threadsafe(elt.request_done, res, fail)
-            requests.task_done()
+            self.loop.call_soon_threadsafe(elt.request_done, res, fail)
+            self.queue.task_done()
         #end while
-    #end do_run
+        self.runner = None
+    #end _do_run
 
     def terminate(self) :
         "tells the processor thread to terminate."
         if not self.stopping :
             self.stopping = True
-            self.requests.put(None)
+            self.queue.put(None)
         #end if
+    #end terminate
+
+#end RequestQueue
+
+class AsyncProcessor :
+    "wrapper around Python I/O-related objects which makes all (relevant) calls" \
+    " asynchronous by passing them off to a dedicated request-runner thread."
+
+    def __init__(self, io_obj, funcdefs) :
+
+        def def_queue_request(name, nrargs) :
+            # defines an async wrapper around the given method of io_obj
+            # as a method of this class with the same name.
+
+            io_meth = getattr(io_obj, name)
+
+            async def reqfunc(*args) :
+                if len(args) != nrargs :
+                    raise TypeError \
+                      (
+                            "%s.%s expects %d args, not %d"
+                        %
+                            (type(io_obj).__name__, name, nrargs, len(args))
+                      )
+                #end if
+                return \
+                    await self.requests.request(io_meth, args)
+            #end reqfunc
+
+        #begin def_queue_request
+            reqfunc.__name__ = name
+            setattr(self, name, reqfunc)
+        #end def_queue_request
+
+    #begin __init__
+        if (
+                not isinstance(funcdefs, (list, tuple))
+            or
+                not all
+                  (
+                        isinstance(name, str)
+                    and
+                        not name.startswith("_")
+                    and
+                        name not in
+                            {
+                                "fileno", "io_obj", "requests", "terminate",
+                            }
+                          # attributes of base class
+                    and
+                        isinstance(nrargs, int)
+                    and
+                        nrargs >= 0
+                    for name, nrargs in funcdefs
+                  )
+        ) :
+            raise TypeError("funcdefs must be sequence of («name», «nrargs») pairs")
+        #end if
+        for name, nrargs in funcdefs :
+            def_queue_request(name, nrargs)
+        #end for
+        self.io_obj = io_obj
+        self.requests = RequestQueue()
+    #end __init__
+
+    def fileno(self) :
+        return \
+            self.io_obj.fileno()
+    #end fileno
+
+    def terminate(self) :
+        "tells the processor thread to terminate."
+        self.requests.terminate()
     #end terminate
 
 #end AsyncProcessor
@@ -1776,6 +1800,11 @@ class Stasis :
             self.http.set_debuglevel(9)
         #end if
         self.passwd = ARIPasswordHandler(username, password)
+        if ASYNC :
+            self.requests = RequestQueue()
+        else :
+            self.requests = None
+        #end if
         return \
             self
     #end __new__
@@ -1854,18 +1883,21 @@ class Stasis :
                     "Content-length" : "%d" % len(data),
                 }
             repeated = False
+            def do_request() :
+                self.http.putrequest(method.methodstr, url)
+                for key in sorted(headers.keys()) :
+                    self.http.putheader(key, headers[key])
+                #end for
+                self.http.endheaders()
+                self.http.send(data)
+                resp = self.http.getresponse()
+                return \
+                    resp
+            #end do_request
             if ASYNC :
                 while True :
                     try :
-                        # do all these async, to avoid assuming anything about
-                        # when actual communication with server happens
-                        await call_async(self.http.putrequest, (method.methodstr, url))
-                        for key in sorted(headers.keys()) :
-                            await call_async(self.http.putheader, (key, headers[key]))
-                        #end for
-                        await call_async(self.http.endheaders, ())
-                        await call_async(self.http.send, (data,))
-                        resp = await call_async(self.http.getresponse, ())
+                        resp = await self.requests.request(do_request, ())
                     except (BrokenPipeError, http.client.RemoteDisconnected) :
                         if repeated :
                             raise # only retry once
@@ -1882,13 +1914,7 @@ class Stasis :
             else :
                 while True :
                     try :
-                        self.http.putrequest(method.methodstr, url)
-                        for key in sorted(headers.keys()) :
-                            self.http.putheader(key, headers[key])
-                        #end for
-                        self.http.endheaders()
-                        self.http.send(data)
-                        resp = self.http.getresponse()
+                        resp = do_request()
                     except (BrokenPipeError, http.client.RemoteDisconnected) :
                         if repeated :
                             raise # only retry once
@@ -1936,6 +1962,7 @@ class Stasis :
 
     async def close(self) :
         if self.http != None :
+            self.requests.terminate()
             conn = self.http
             self.http = None # stop further async calls
             if ASYNC :

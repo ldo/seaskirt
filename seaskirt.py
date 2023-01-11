@@ -1,7 +1,7 @@
 #+
 # Various useful Asterisk-related definitions.
 #
-# Copyright © 2007-2022 by Lawrence D'Oliveiro <ldo@geek-central.gen.nz>.
+# Copyright © 2007-2023 by Lawrence D'Oliveiro <ldo@geek-central.gen.nz>.
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public

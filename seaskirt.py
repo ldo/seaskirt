@@ -121,9 +121,11 @@ class ConditionalExpander(ast.NodeTransformer) :
                 args = node.args,
                 body = body,
                 decorator_list = node.decorator_list,
-                returns = node.returns,
-                type_comment = node.type_comment
+                returns = node.returns
               )
+            if hasattr(node, "type_comment") :
+                result.type_comment = node.type_comment
+            #end if
         #end if
         return \
             result

@@ -696,11 +696,31 @@ class SocketWrapper :
     #end __init__
 
     async def connect(self, addr, timeout = None) :
-        if ASYNC :
-            await call_async(self.sock.connect, (addr,), timeout = timeout)
-        else :
-            # TODO: timeout
+        self.sock.setblocking(False)
+        try :
             self.sock.connect(addr)
+        except BlockingIOError as err :
+            if err.errno != errno.EINPROGRESS :
+                raise
+            #end if
+            done_connect = False
+        else :
+            done_connect = True # would never actually occur?
+        #end try
+        if not done_connect :
+            if ASYNC :
+                recv, send = await sock_wait_async(self.sock, False, True, timeout)
+            else :
+                recv, send = sock_wait(self.sock, False, True, timeout)
+            #end if
+            if not send :
+                self.sock.close()
+                raise TimeoutError("socket taking too long to connect")
+            #end if
+            connerr = self.sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+            if connerr != 0 :
+                raise OSError(connerr, "socket connection failure: %s" % os.strerror(connerr))
+            #end if
         #end if
     #end connect
 
@@ -938,6 +958,8 @@ class SSLSocketWrapper :
     #end _do_io
 
     async def connect(self, addr, timeout = None) :
+        # Can’t quite figure out how to do a nonblocking connect, as
+        # with unencrypted SocketWrapper. So fall back to call_async.
         if ASYNC :
             await call_async(self.sock.connect, (addr,), timeout = timeout)
             self.sock.setblocking(False)

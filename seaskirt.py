@@ -184,6 +184,7 @@ def def_sync_async_classes(class_template, sync_classname, async_classname) :
     " namespace where the former is named sync_classname and the latter is named" \
     " async_classname."
     src = inspect.getsource(class_template)
+    # need two copies of the AST, since the expansion process modifies it in-place
     syntax = ast.parse(src, mode = "exec")
     sync_version = ConditionalExpander \
       (
@@ -377,7 +378,10 @@ class RequestQueue :
 
 class AsyncProcessor :
     "wrapper around Python I/O-related objects which makes all (relevant) calls" \
-    " asynchronous by passing them off to a dedicated request-runner thread."
+    " asynchronous by passing them off to a dedicated request-runner thread." \
+    " Constructor takes the object and a list of («method-name», «nrargs») pairs," \
+    " and defines async methods with the same names and expected numbers of arguments" \
+    " on the instantiated wrapper object."
 
     def __init__(self, io_obj, funcdefs) :
 
@@ -388,6 +392,7 @@ class AsyncProcessor :
             io_meth = getattr(io_obj, name)
 
             async def reqfunc(*args) :
+                # common handler for all async method calls.
                 if len(args) != nrargs :
                     raise TypeError \
                       (

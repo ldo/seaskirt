@@ -31,6 +31,7 @@ import ssl
 import threading
 import queue
 import base64
+import hashlib
 import urllib.parse
 import http.client
 import json
@@ -1156,10 +1157,23 @@ class Manager :
                 break
         #end while
         self.hello, self.buff = self.buff.split(self.NL, 1)
+        # Use challenge/response authentication. This doesn’t seem to be
+        # documented in the Asterisk wiki anywhere, but is described
+        # here: <https://www.oreilly.com/library/view/asterisk-the-future/9780596510480/ch10.html>
+        if ASYNC :
+            response = await self.transact(action = "Challenge", parms = {"AuthType" : "MD5"})
+        else :
+            response = self.transact(action = "Challenge", parms = {"AuthType" : "MD5"})
+        #end if
+        challenge = response["Challenge"]
+        hash = hashlib.md5()
+        hash.update(challenge.encode())
+        hash.update(password.encode())
         parms = \
             {
                 "Username" : username,
-                "Secret" : password,
+                "AuthType" : "MD5",
+                "Key" : hash.hexdigest(),
             }
         if not want_events :
             parms["Events"] = "off"

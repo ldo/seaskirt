@@ -685,8 +685,7 @@ _io_wait_async.__name__ = "io_wait"
 
 class SocketWrapper :
     "a wrapper around unencrypted socket connections, providing sync or async" \
-    " transfers with optional timeouts. Note no fileno() method is provided, for" \
-    " compatibility with SSLSocketWrapper."
+    " transfers with optional timeouts."
 
     def __init__(self) :
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -822,6 +821,11 @@ class SocketWrapper :
         #end if
     #end close
 
+    def fileno(self) :
+        return \
+            self.sock.fileno()
+    #end fileno
+
     poll_register = _poll_register
 
 #end SocketWrapper
@@ -856,9 +860,9 @@ class SSLSocketWrapper :
     "a wrapper around TLS-encrypted socket connections, providing sync or async" \
     " transfers with optional timeouts. ssl_context can be specified as the path" \
     " to the CA cert file or directory, or a preconfigured ssl.SSLContext object." \
-    " Note no fileno() method is provided, since SSL may require writes before you" \
-    " can read more, or vice versa; so use poll_register() and io_wait() calls" \
-    " if you want to hook into an event loop safely."
+    " While a fileno() method is provided, note that SSL may require writes before" \
+    " you can read more, or vice versa; so it is better to use poll_register() and" \
+    " io_wait() calls if you want to hook into an event loop safely."
 
     def __init__(self, ssl_context) :
         self.ssl_context = get_ssl_context(ssl_context)
@@ -1038,6 +1042,11 @@ class SSLSocketWrapper :
         return \
             self._do_io("close", self.sock.close, (), None)
     #end close
+
+    def fileno(self) :
+        return \
+            self.sock.fileno()
+    #end fileno
 
     poll_register = _poll_register
 

@@ -136,8 +136,8 @@ are implemented as HTTP requests of various types; note the use of
 
 Further, channels can be put into “stasis”, suspending further
 execution of dialplan applications from the context definition
-(similar to AsyncAGI state). In this state, the channel can be told to
-execute arbitrary dialplan applications via direct ARI requests. The
+(similar to AsyncAGI state). In this state, the channel can be controlled
+at a low level via ARI requests. The
 channel exits from stasis when the call is hung up, or a client posts
 the `/channels/`_channelid_`/continue` REST method call.
 
@@ -273,4 +273,4 @@ they work with `asyncio` and offer TLS encryption.
 | [`asyncari`](https://github.com/M-o-a-T/asyncari/) | no | no | yes | via [`anyio`](https://github.com/agronholm/anyio) | no |
 
 Lawrence D'Oliveiro <ldo@geek-central.gen.nz>
-2023 January 11
+2023 February 13

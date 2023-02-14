@@ -1259,14 +1259,21 @@ class Manager :
                 response = {}
                 while True :
                     split, resp = resp.split(NL, 1)
-                    keyword, value = split.split(": ", 1)
-                    if keyword in response :
-                        response[keyword] += "\n" + value
-                    else :
-                        response[keyword] = value
+                    if split != "" :
+                        if split.endswith(":") :
+                            keyword = split[:-1]
+                            value = ""
+                        else :
+                            keyword, value = split.split(": ", 1)
+                        #end if
+                        if keyword in response :
+                            response[keyword] += "\n" + value
+                        else :
+                            response[keyword] = value
+                        #end if
+                        if resp == "" :
+                            break
                     #end if
-                    if resp == "" :
-                        break
                 #end while
                 break
             #end if

@@ -693,8 +693,10 @@ class SocketWrapper :
     "a wrapper around unencrypted socket connections, providing sync or async" \
     " transfers with optional timeouts."
 
-    def __init__(self) :
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    def __init__(self, sock = None) :
+        if sock == None :
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        #end if
         self.sock = sock
         self.sock_need = SOCK_NEED.NOTHING
           # set by immediate-mode calls, used by I/O-polling hooks to decide what to wait for
@@ -2310,8 +2312,10 @@ class Console :
         #end if
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         if ASYNC :
-            await call_async(sock.connect, (socket_path,))
+            sock = SocketWrapperAsync(sock)
+            await sock.connect(socket_path)
         else :
+            sock = SocketWrapper(sock)
             sock.connect(socket_path)
         #end if
         self.sock = sock
@@ -2482,7 +2486,7 @@ class Console :
     async def close(self) :
         if self.sock != None :
             if ASYNC :
-                await call_async(self.sock.close, ())
+                await self.sock.close()
             else :
                 self.sock.close()
             #end if

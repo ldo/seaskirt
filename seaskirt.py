@@ -1867,7 +1867,7 @@ class Stasis :
             self
     #end __new__
 
-    async def request(self, method, path, params, data = None) :
+    async def request(self, method, path, params = None, data = None) :
         "initiates a request to the specified path with the specified params and" \
         "(optional) request body object, and returns a Python object decoded from" \
         " the JSON response string."

@@ -2042,9 +2042,9 @@ class Stasis :
                   (
                     host = parent.host,
                     target =
-                            "%s/events?app=%s&subscribeAll=%d"
+                            "%s/events?app=%s&subscribeAll=%s"
                         %
-                            (parent.prefix, ",".join(apps), int(subscribe_all)),
+                            (parent.prefix, ",".join(apps), ("false", "true")[subscribe_all]),
                     extra_headers =
                         [
                             (

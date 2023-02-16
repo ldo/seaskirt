@@ -2192,8 +2192,8 @@ class Stasis :
                 #end if
                 if deadline.deadline != None :
                     data = self.sock.recvimmed(IOBUFSIZE)
-                    if data == None and (not self.using_ssl or time.monotonic() > deadline.deadline) :
-                        # timeout, but give SSL a chance to keep reporting want-more exceptions.
+                    if data == None and time.monotonic() > deadline.deadline :
+                        # timeout
                         evt = None
                         break
                     #end if

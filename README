@@ -213,6 +213,51 @@ match that `ActionID` value (or which do not have an ActionID parameter).
 At least things are a bit simpler with ARI.
 
 
+Originating Calls
+=================
+
+The Originate action (which can be instigated via AMI or ARI) lets you
+programmatically initiate a call from your own program. A call has to
+have two ends, which one may call the “inbound” and “outbound” ends
+(though, remember, Asterisk has no innate notion of which call
+endpoints might be considered “inside” or “outside” your network).
+These two ends are specified via three parameters: the AMI `Originate`
+action calls these the “Channel” “Context” and “Exten[sion]”, while
+the ARI `POST /channels` request calls them “Endpoint”, “Context” and
+“Extension” respectively.
+
+One may consider the Channel/Endpoint as representing the “inbound”
+end of the call, while the Context and Extension specify the
+“outbound” end. With this convention, the Extension is where you
+specify the number to call, when you are trying to reach someone
+outside your local phone network. The Context is of course the name of
+a context stanza as defined in your dialplan (`extensions.conf`),
+which controls how the Extension is actually interpreted to place a
+call.
+
+But it is possible to do things the other way round, within some
+limits. The Channel/Endpoint value takes the form
+“«driver»/«exten»@«ctx»” or “«driver»/«ctx»”, where «driver» indicates
+which channel driver to use: for example “PJSIP” for a SIP connection,
+or “DAHDI” for an analog or ISDN line.
+
+For a SIP connection, «ctx» would specify the endpoint name as defined
+in your `pjsip.conf`, while for DAHDI, this would be the interface
+line number; for a VoIP provider or DAHDI FXO line, you would also
+include the «exten» to tell the provider/exchange what number you want
+to call, while for a DAHDI FXS line or a SIP phone on your local
+network, you would leave this off since the «ctx» is itself sufficient
+to identify the device/handset.
+
+But you can also specify the value “Local” for «driver», which
+indicates that this end of the call terminates in your dialplan,
+rather than some interface to the outside world, in which case «ctx»
+is the name of the dialplan context to use, and «exten» gives an
+extension that is treated as though the context is answering an
+incoming call to that extension. It is also permitted to use special
+values like “s” for «exten».
+
+
 SSL/TLS Support
 ===============
 
@@ -273,4 +318,4 @@ they work with `asyncio` and offer TLS encryption.
 | [`asyncari`](https://github.com/M-o-a-T/asyncari/) | no | no | yes | via [`anyio`](https://github.com/agronholm/anyio) | no |
 
 Lawrence D'Oliveiro <ldo@geek-central.gen.nz>
-2023 February 13
+2023 March 11

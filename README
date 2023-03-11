@@ -257,6 +257,11 @@ extension that is treated as though the context is answering an
 incoming call to that extension. It is also permitted to use special
 values like “s” for «exten».
 
+So, in summary, the “outbound” end must always go through an extension
+in a dialplan context. The “inbound” end can also go through a dialplan
+context (via the “Local” driver), or directly through some specified
+interface driver.
+
 
 SSL/TLS Support
 ===============

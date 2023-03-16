@@ -1952,8 +1952,16 @@ class Stasis :
                 self.http.endheaders()
                 self.http.send(data)
                 resp = self.http.getresponse()
+                # Need to ensure resp is freed before returning,
+                # otherwise a subsequent request could fail with a
+                # http.client.ResponseNotReady exception in the
+                # getresponse() call if it starts while this response
+                # object still exists. So I extract the bits I need here.
                 return \
-                    resp
+                    {
+                        "headers" : dict((k.lower(), v) for k, v in resp.getheaders()),
+                        "data" : resp.read(),
+                    }
             #end do_request
             while True :
                 try :
@@ -1987,13 +1995,17 @@ class Stasis :
         if fail != None :
             raise fail
         #end if
-        resptype = resp.getheader("content-type")
-        respdata = resp.read()
+        resptype = resp["headers"].get("content-type")
+        respdata = resp["data"]
         if len(respdata) != 0 and resptype != "application/json" :
-            raise ARIError(None, "unexpected nonempty content type %s data %s" % (resptype, repr(respdata)))
+            raise ARIError \
+              (
+                None,
+                "unexpected nonempty content type %s data %s" % (resptype, repr(respdata))
+              )
         #end if
         if self.debug :
-            sys.stderr.write("Stasis resp headers = %s\n" % repr(resp.getheaders()))
+            sys.stderr.write("Stasis resp headers = %s\n" % repr(resp["headers"]))
             sys.stderr.write("Stasis raw resp = %s\n" % repr(respdata))
         #end if
         if respdata != b"" :

@@ -1413,6 +1413,15 @@ class Manager :
                           )
                     #end if
                     first_response = False
+                elif items[0] == "ActionID" :
+                    if self.last_request_id != items[1] :
+                        raise RuntimeError \
+                          (
+                                "Command response out of sync -- expected %s, got %s"
+                            %
+                                (repr(self.last_request_id), repr(items[1]))
+                          )
+                    #end if
                 elif items[0] == "Output" :
                     assert not first_response
                     response += items[1] + "\n"

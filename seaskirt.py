@@ -675,7 +675,7 @@ async def _io_wait_async(self, timeout = None) :
     if self.sock_need != SOCK_NEED.NOTHING :
         recv, send = await sock_wait_async \
           (
-            self.sock.fileno(),
+            self.sock,
             recv = self.sock_need == SOCK_NEED.READABLE,
             send = self.sock_need == SOCK_NEED.WRITABLE,
             timeout = timeout
@@ -931,7 +931,7 @@ class SSLSocketWrapper :
                     if ASYNC :
                         recv, send = await sock_wait_async \
                           (
-                            self.sock.fileno(),
+                            self.sock,
                             recv = sock_need == SOCK_NEED.READABLE,
                             send = sock_need == SOCK_NEED.WRITABLE,
                             timeout = deadline.timeout
@@ -939,7 +939,7 @@ class SSLSocketWrapper :
                     else :
                         recv, send = sock_wait \
                           (
-                            self.sock.fileno(),
+                            self.sock,
                             recv = sock_need == SOCK_NEED.READABLE,
                             send = sock_need == SOCK_NEED.WRITABLE,
                             timeout = deadline.timeout

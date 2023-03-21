@@ -1569,7 +1569,7 @@ class Gateway :
         if (
                     fastagi_socket != None
                 and
-                    (from_asterisk != None or to_asterisk != None or with_audio_in)
+                    (from_asterisk != None or to_asterisk != None or with_audio_in or args != None)
             or
                 (from_asterisk != None) != (to_asterisk != None)
         ) :
@@ -1583,6 +1583,7 @@ class Gateway :
         #end if
         self = super().__new__(celf)
         self.fastagi = fastagi_socket != None
+        self.args = None
         self.debug = debug
         self.timeout = timeout
         self.hungup = False
@@ -1666,7 +1667,7 @@ class Gateway :
         #end if
         if args != None :
             self.args = args
-        else :
+        elif not self.fastagi :
             self.args = sys.argv
         #end if
         self.agi_vars = {}
@@ -1684,6 +1685,17 @@ class Gateway :
             name, value = line.split(": ", 1)
             self.agi_vars[name] = value
         #end while
+        if self.fastagi :
+            self.args = []
+            i = 0
+            while True :
+                i += 1
+                key = "agi_arg_%d" % i
+                if key not in self.agi_vars :
+                    break
+                self.args.append(self.agi_vars[key])
+            #end while
+        #end if
         return \
             self
     #end __new__

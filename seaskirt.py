@@ -977,7 +977,6 @@ class SSLSocketWrapper :
             self.sock.setblocking(False)
             await self._do_io("connect handshake", self.sock.do_handshake, (), timeout)
         else :
-            # TODO: timeout
             self.sock.connect(addr)
             self.sock.setblocking(False)
             self._do_io("connect handshake", self.sock.do_handshake, (), timeout)

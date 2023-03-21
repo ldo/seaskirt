@@ -1614,7 +1614,7 @@ class Gateway :
             #end if
             return \
                 result
-        #end listen
+        #end accept
 
         async def close(self) :
             if self.sock != None :

@@ -377,101 +377,132 @@ class RequestQueue :
 
 #end RequestQueue
 
-class AsyncProcessor :
-    "wrapper around Python I/O-related objects which makes all (relevant) calls" \
-    " asynchronous by passing them off to a dedicated request-runner thread." \
-    " Constructor takes the object and a list of («method-name», «nrargs») pairs," \
-    " and defines async methods with the same names and expected numbers of arguments" \
-    " on the instantiated wrapper object."
+class AsyncPipeFile :
+    "wrapper around a Python file object which is a pipe connection, where" \
+    " all the relevant I/O calls become asynchronous."
 
-    def __init__(self, io_obj, funcdefs) :
+    def __init__(self, fd, writing, is_text, timeout) :
+        self.fd = fd
+        self.writing = writing # True for write-only, False for read-only
+        self.is_text = is_text
+        self.timeout = timeout # can be None
+        self.eof = False
+        self.buf = b""
+        os.set_blocking(fd, False)
+    #end __init__
 
-        def def_queue_request(name, nrargs) :
-            # defines an async wrapper around the given method of io_obj
-            # as a method of this class with the same name.
-
-            io_meth = getattr(io_obj, name)
-
-            async def reqfunc(*args) :
-                # common handler for all async method calls.
-                if len(args) != nrargs :
-                    raise TypeError \
-                      (
-                            "%s.%s expects %d args, not %d"
-                        %
-                            (type(io_obj).__name__, name, nrargs, len(args))
-                      )
-                #end if
-                return \
-                    await self.requests.request(io_meth, args)
-            #end reqfunc
-
-        #begin def_queue_request
-            reqfunc.__name__ = name
-            setattr(self, name, reqfunc)
-        #end def_queue_request
-
-    #begin __init__
-        if (
-                not isinstance(funcdefs, (list, tuple))
-            or
-                not all
-                  (
-                        isinstance(name, str)
-                    and
-                        not name.startswith("_")
-                    and
-                        name not in
-                            {
-                                "fileno", "io_obj", "requests", "terminate",
-                            }
-                          # attributes of base class
-                    and
-                        isinstance(nrargs, int)
-                    and
-                        nrargs >= 0
-                    for name, nrargs in funcdefs
-                  )
-        ) :
-            raise TypeError("funcdefs must be sequence of («name», «nrargs») pairs")
+    async def read(self, nrbytes = None) :
+        "note this always returns bytes, even if self.is_text."
+        if self.writing :
+            raise RuntimeError("trying to read from write-only AsyncPipeFile")
         #end if
-        for name, nrargs in funcdefs :
-            def_queue_request(name, nrargs)
-        #end for
-        self.io_obj = io_obj
-        self.requests = RequestQueue()
-    #end __init__
-
-    def fileno(self) :
+        while True :
+            if self.eof :
+                break
+            if nrbytes != None and nrbytes <= len(self.buf) :
+                break
+            recv = (await sock_wait_async(self.fd, True, False, self.timeout))[0]
+            if not recv :
+                raise TimeoutError("pipe taking too long to read")
+            #end if
+            more = os.read(self.fd, IOBUFSIZE)
+            if len(more) == 0 :
+                self.eof = True
+                break
+            #end if
+            self.buf += more
+        #end while
+        if len(self.buf) != 0 :
+            if nrbytes != None :
+                result = self.buf[:nrbytes]
+                self.buf = self.buf[nrbytes:]
+            else :
+                result = self.buf
+                self.buf = (b"", "")[self.is_text]
+            #end if
+        else :
+            result = b""
+        #end if
         return \
-            self.io_obj.fileno()
-    #end fileno
+            result
+    #end read
 
-    def terminate(self) :
-        "tells the processor thread to terminate."
-        self.requests.terminate()
-    #end terminate
+    async def readline(self) :
+        if not self.is_text :
+            raise RuntimeError("trying to read line from non-text AsyncPipeFile")
+        #end if
+        result = ""
+        eol_seen = False
+        while True :
+            line_end = self.buf.find(b"\n")
+            if line_end >= 0 :
+                line_end += 1
+                eol_seen = True
+            else :
+                line_end = len(self.buf)
+            #end if
+            more = self.buf[:line_end]
+            self.buf = self.buf[line_end:]
+            result += more.decode()
+            if eol_seen :
+                break
+            if self.eof :
+                break
+            recv = (await sock_wait_async(self.fd, True, False, self.timeout))[0]
+            if not recv :
+                raise TimeoutError("pipe taking too long to read line")
+            #end if
+            more = os.read(self.fd, IOBUFSIZE)
+            if len(more) == 0 :
+                self.eof = True
+                break
+            #end if
+            self.buf += more
+        #end while
+        return \
+            result
+    #end readline
 
-#end AsyncProcessor
+    async def write(self, data) :
+        if not self.writing :
+            raise RuntimeError("trying to write to read-only AsyncPipeFile")
+        #end if
+        if self.is_text :
+            data = data.encode()
+        #end if
+        self.buf += data
+        if len(self.buf) >= IOBUFSIZE :
+            self.flush(False)
+        #end if
+    #end write
 
-class AsyncFile(AsyncProcessor) :
-    "AsyncProcessor subclass for wrapping Python file objects."
+    async def flush(self, flushall = True) :
+        if not self.writing :
+            raise RuntimeError("trying to flush read-only AsyncPipeFile")
+        #end if
+        while True :
+            if (lambda : len(self.buf) < IOBUFSIZE, lambda : len(self.buf) == 0)[flushall]() :
+                break
+            send = (await sock_wait_async(self.fd, False, True, self.timeout))[1]
+            if not send :
+                raise TimeoutError("pipe taking too long to become writable")
+            #end if
+            written = os.write(self.fd, self.buf[:min(len(self.buf), IOBUFSIZE)])
+            self.buf = self.buf[written:]
+        #end while
+    #end flush
 
-    def __init__(self, fv) :
-        super().__init__ \
-          (
-            fv,
-            [ # list all the calls I actually use
-                ("read", 1),
-                ("readline", 0),
-                ("write", 1),
-                ("flush", 0),
-                ("close", 0),
-            ]
-          )
-    #end __init__
+    async def close(self) :
+        if self.fd != None :
+            if self.writing :
+                await self.flush(True)
+            #end if
+            os.close(self.fd)
+            self.fd = None
+        #end if
+    #end close
 
-#end AsyncFile
+#end AsyncPipeFile
 
 class SOCK_NEED(enum.Enum) :
     "need to wait for socket to allow I/O of this type before further" \
@@ -1516,7 +1547,17 @@ class Gateway :
     " incoming connections; the accept() method of this class will return a Gateway" \
     " instance for each such connection."
 
-    async def __new__(celf, *, from_asterisk = None, to_asterisk = None, args = None, with_audio_in = False, debug = False) :
+    async def __new__ \
+      (celf, *,
+        fastagi_socket = None,
+        from_asterisk = None,
+        to_asterisk = None,
+        args = None,
+        with_audio_in = False,
+        timeout = None,
+        debug = False
+      ) \
+    :
         "from_asterisk and to_asterisk are file objects to use to communicate" \
         " with Asterisk; default to sys.stdin and sys.stdout if not specified, while" \
         " args are taken from sys.argv if not specified.\n" \
@@ -1525,42 +1566,108 @@ class Gateway :
         " was invoked via the EAGI application command).\n" \
         "agi_vars attribute will be set to a dictionary containing all the initial" \
         " AGI variable definitions passed from Asterisk."
+        if (
+                    fastagi_socket != None
+                and
+                    (from_asterisk != None or to_asterisk != None or with_audio_in)
+            or
+                (from_asterisk != None) != (to_asterisk != None)
+        ) :
+            raise RuntimeError \
+              (
+                "inconsistent AGI args: either specify fastagi_socket and"
+                " none of (from_asterisk, to_asterisk, with_audio_in) or leave"
+                " out fastagi_socket and specify both of from_asterisk, to_asterisk"
+                " and optionally with_audio_in"
+              )
+        #end if
         self = super().__new__(celf)
+        self.fastagi = fastagi_socket != None
         self.debug = debug
+        self.timeout = timeout
         self.hungup = False
-        if from_asterisk == None :
-            from_asterisk = sys.stdin
-        #end if
-        if to_asterisk == None :
-            to_asterisk = sys.stdout
-        #end if
-        if ASYNC :
-            from_asterisk = AsyncFile(from_asterisk)
-            to_asterisk = AsyncFile(to_asterisk)
+        self.audio_in = None
+        if fastagi_socket != None :
+            # separate fds for the two directions so they can be closed separately
+            from_asterisk = os.dup(fastagi_socket.fileno())
+            to_asterisk = os.dup(fastagi_socket.fileno())
+            if ASYNC :
+                from_asterisk = AsyncPipeFile \
+                  (
+                    from_asterisk,
+                    writing = False,
+                    is_text = True,
+                    timeout = self.timeout
+                  )
+                to_asterisk = AsyncPipeFile \
+                  (
+                    to_asterisk,
+                    writing = True,
+                    is_text = True,
+                    timeout = self.timeout
+                  )
+            else :
+                self.from_asterisk = os.fdopen(from_asterisk, "rt")
+                self.to_asterisk = os.fdopen(to_asterisk, "wt")
+            #end if
+            self.from_asterisk = from_asterisk
+            self.to_asterisk = to_asterisk
+        else :
+            if from_asterisk == None :
+                from_asterisk = sys.stdin.fileno()
+            elif not isinstance(from_asterisk, int) :
+                from_asterisk = from_asterisk.fileno()
+            #end if
+            if to_asterisk == None :
+                to_asterisk = sys.stdout.fileno()
+            elif not isinstance(to_asterisk, int) :
+                to_asterisk = to_asterisk.fileno()
+            #end if
+            if ASYNC :
+                from_asterisk = AsyncPipeFile \
+                  (
+                    from_asterisk,
+                    writing = False,
+                    is_text = True,
+                    timeout = self.timeout
+                  )
+                to_asterisk = AsyncPipeFile \
+                  (
+                    to_asterisk,
+                    writing = True,
+                    is_text = True,
+                    timeout = self.timeout
+                  )
+            #end if
+            self.from_asterisk = from_asterisk
+            self.to_asterisk = to_asterisk
+            if with_audio_in :
+                try :
+                    self.audio_in = os.fdopen(3, "rb")
+                except OSError as err :
+                    if err.errno != errno.EBADF :
+                        raise
+                    #end if
+                    self.audio_in = None
+                #end if
+                if self.audio_in == None :
+                    raise RuntimeError("no audio-in fd available")
+                #end if
+                if ASYNC :
+                    self.audio_in = AsyncPipeFile \
+                      (
+                        self.audio_in.fileno(),
+                        writing = False,
+                        is_text = False,
+                        timeout = self.timeout
+                      )
+                #end if
+            #end if
         #end if
         if args != None :
             self.args = args
         else :
             self.args = sys.argv
-        #end if
-        self.from_asterisk = from_asterisk
-        self.to_asterisk = to_asterisk
-        self.audio_in = None
-        if with_audio_in :
-            try :
-                self.audio_in = os.fdopen(3, "rb")
-            except OSError as err :
-                if err.errno != errno.EBADF :
-                    raise
-                #end if
-                self.audio_in = None
-            #end if
-            if self.audio_in == None :
-                raise RuntimeError("no audio-in fd available")
-            #end if
-            if ASYNC :
-                self.audio_in = AsyncFile(self.audio_in)
-            #end if
         #end if
         self.agi_vars = {}
         while True :
@@ -1583,12 +1690,14 @@ class Gateway :
 
     class Listener :
 
-        def __init__(self, parent, bindaddr, port, maxlisten = 0, debug = False) :
+        def __init__(self, parent, bindaddr, port, maxlisten = 0, conn_timeout = None, debug = False) :
             self.debug = debug
             self.parent = parent
+            self.conn_timeout = conn_timeout
             self.sock = socket.socket()
             self.sock.bind((bindaddr, port))
             self.sock.listen(maxlisten)
+            self.sock.setblocking(False)
         #end __init__
 
         def fileno(self) :
@@ -1596,21 +1705,54 @@ class Gateway :
                 self.sock.fileno()
         #end fileno
 
-        async def accept(self) :
-            if ASYNC :
-                sock, peer = await call_async(self.sock.accept, ())
+        async def accept(self, listen_timeout = None) :
+            if listen_timeout == None or listen_timeout > 0 :
+                if ASYNC :
+                    read = (await sock_wait_async(self.sock, True, False, listen_timeout))[0]
+                else :
+                    read = sock_wait(self.sock, True, False, listen_timeout)[0]
+                #end if
             else :
-                sock, peer = self.sock.accept()
+                read = True
             #end if
-            connin = os.fdopen(os.dup(sock.fileno()), "rt")
-            connout = os.fdopen(os.dup(sock.fileno()), "wt")
-            if self.debug :
-                sys.stderr.write("%s.Listener connection from %s\n" % (self.parent.__name__, peer))
-            #end if
-            if ASYNC :
-                result = await self.parent(from_asterisk = connin, to_asterisk = connout, debug = self.debug)
+            if read :
+                try :
+                    sock, peer = self.sock.accept()
+                except BlockingIOError :
+                    sock = None
+                #end try
             else :
-                result = self.parent(from_asterisk = connin, to_asterisk = connout, debug = self.debug)
+                sock = None
+            #end if
+            if sock != None :
+                if self.debug :
+                    sys.stderr.write("%s.Listener connection from %s\n" % (self.parent.__name__, peer))
+                #end if
+                if ASYNC :
+                    result = await self.parent \
+                      (
+                        fastagi_socket = sock,
+                        timeout = self.conn_timeout,
+                        debug = self.debug
+                      )
+                else :
+                    result = self.parent \
+                      (
+                        fastagi_socket = sock,
+                        timeout = self.conn_timeout,
+                        debug = self.debug
+                      )
+                #end if
+            else :
+                if self.debug :
+                    sys.stderr.write \
+                      (
+                            "%s.Listener.accept() %s\n"
+                        %
+                            (self.parent.__name__, ("timed out", "got nothing")[read])
+                      )
+                #end if
+                result = None
             #end if
             return \
                 result
@@ -1618,6 +1760,7 @@ class Gateway :
 
         async def close(self) :
             if self.sock != None :
+                self.sock.setblocking(True)
                 if ASYNC :
                     await call_async(self.sock.close, ())
                 else :
@@ -1630,16 +1773,23 @@ class Gateway :
     #end Listener
 
     @classmethod
-    def listener(celf, bindaddr, port, maxlisten = 0, debug = False) :
+    def listener(celf, bindaddr, port, maxlisten = 0, conn_timeout = None, debug = False) :
         return \
-            celf.Listener(celf, bindaddr, port, maxlisten, debug)
+            celf.Listener \
+              (
+                celf,
+                bindaddr = bindaddr,
+                port = port,
+                maxlisten = maxlisten,
+                conn_timeout = conn_timeout,
+                debug = debug
+              )
     #end listener
 
     async def close(self) :
         if self.from_asterisk != None :
             if ASYNC :
                 await self.from_asterisk.close()
-                self.from_asterisk.terminate()
             else :
                 self.from_asterisk.close()
             #end if
@@ -1648,7 +1798,6 @@ class Gateway :
         if self.to_asterisk != None :
             if ASYNC :
                 await self.to_asterisk.close()
-                self.to_asterisk.terminate()
             else :
                 self.to_asterisk.close()
             #end if

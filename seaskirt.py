@@ -2003,8 +2003,6 @@ class Stasis :
         self.port = port
         self.prefix = prefix
         self.debug = debug
-        self.url_base = \
-            "%s://%s:%d" % (("http", "https")[self.ssl_context != None], self.host, self.port)
         # Use http.client instead of urllib.request so that I can ask for
         # persistent connections.
         if self.ssl_context != None :

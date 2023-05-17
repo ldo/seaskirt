@@ -2126,6 +2126,8 @@ class Stasis :
                 # object still exists. So I extract the bits I need here.
                 return \
                     {
+                        "status" : resp.status,
+                        "reason" : resp.reason,
                         "headers" : dict((k.lower(), v) for k, v in resp.getheaders()),
                         "data" : resp.read(),
                     }
@@ -2161,6 +2163,9 @@ class Stasis :
         #end try
         if fail != None :
             raise fail
+        #end if
+        if resp["status"] // 100 != 2 :
+            raise ARIError(resp["status"], "HTTP: %s" % resp["reason"])
         #end if
         resptype = resp["headers"].get("content-type")
         respdata = resp["data"]

@@ -1912,14 +1912,14 @@ HTTP_DEFAULT_TLS_PORT = 8089
 class ARIError(Exception) :
     "just to identify HTTP error codes returned from Asterisk ARI."
 
-    def __init__(self, errno, msg) :
+    def __init__(self, request_url, errno, msg) :
         self.errno = errno # integer or None
         self.msg = msg
     #end __init__
 
     def __str__(self) :
         if self.errno != None :
-            result = "ARI Error %d: %s" % (self.errno, self.msg)
+            result = "ARI Error from %s: %d -- %s" % (self.request_url, self.errno, self.msg)
         else :
             result = "ARI Error: %s" % self.msg
         #end if
@@ -2155,23 +2155,24 @@ class Stasis :
         # get those long tracebacks from the depths of http.client or
         # elsewhere.
         except http.client.HTTPException as reqfail:
-            fail = ARIError(None, repr(reqfail))
+            fail = ARIError(url, None, repr(reqfail))
         except ConnectionError as reqfail :
-            fail = ARIError(reqfail.errno, reqfail.strerror)
+            fail = ARIError(url, reqfail.errno, reqfail.strerror)
         except TimeoutError :
-            fail = ARIError(None, "server taking too long to respond")
+            fail = ARIError(url, None, "server taking too long to respond")
         #end try
         if fail != None :
             raise fail
         #end if
         if resp["status"] // 100 != 2 :
-            raise ARIError(resp["status"], "HTTP: %s" % resp["reason"])
+            raise ARIError(url, resp["status"], "HTTP: %s" % resp["reason"])
         #end if
         resptype = resp["headers"].get("content-type")
         respdata = resp["data"]
         if len(respdata) != 0 and resptype != "application/json" :
             raise ARIError \
               (
+                url,
                 None,
                 "unexpected nonempty content type %s data %s" % (resptype, repr(respdata))
               )

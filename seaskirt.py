@@ -1928,6 +1928,15 @@ class ARIError(Exception) :
             result
     #end __str__
 
+    def __repr__(self) :
+        return \
+            (
+                "%s(%s, %s, %s)"
+            %
+                (type(self).__name__, repr(self.request_url), repr(self.errno), repr(self.msg))
+            )
+    #end __repr__
+
 #end ARIError
 
 class RESTMETHOD(enum.Enum) :

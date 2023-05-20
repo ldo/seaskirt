@@ -1913,6 +1913,7 @@ class ARIError(Exception) :
     "just to identify HTTP error codes returned from Asterisk ARI."
 
     def __init__(self, request_url, errno, msg) :
+        self.request_url = request_url
         self.errno = errno # integer or None
         self.msg = msg
     #end __init__
@@ -1921,7 +1922,7 @@ class ARIError(Exception) :
         if self.errno != None :
             result = "ARI Error from %s: %d -- %s" % (self.request_url, self.errno, self.msg)
         else :
-            result = "ARI Error: %s" % self.msg
+            result = "ARI Error from %s: %s" % (self.request_url, self.msg)
         #end if
         return \
             result

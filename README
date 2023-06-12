@@ -39,6 +39,15 @@ module), but examples of its use can be found at
 [GitLab](https://gitlab.com/ldo/seaskirt_examples) and
 [GitHub](https://github.com/ldo/seaskirt_examples).
 
+The main design philosophy of Seaskirt is to cover the basic
+protocols. When I compare other bindings (see below), I see they put a
+lot of effort into “convenience” features like defining subclasses to
+represent different event types, or services for filtering incoming
+events and dispatching to registered handlers based on regular
+expressions. In the client code I have written, I have not found such
+facilities to be significant timesavers. Therefore I have omitted them
+from Seaskirt.
+
 
 The Asterisk API Zoo
 ====================
@@ -323,4 +332,4 @@ they work with `asyncio` and offer TLS encryption.
 | [`asyncari`](https://github.com/M-o-a-T/asyncari/) | no | no | yes | via [`anyio`](https://github.com/agronholm/anyio) | no |
 
 Lawrence D'Oliveiro <ldo@geek-central.gen.nz>
-2023 March 11
+2023 June 12

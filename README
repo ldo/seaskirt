@@ -37,7 +37,7 @@ tracebacks report incorrect source lines. These main classes are:
 I haven’t done much documentation for this (besides what’s in the source
 module), but examples of its use can be found at
 [GitLab](https://gitlab.com/ldo/seaskirt_examples) and
-[GitHub](https://github.com/ldo/seaskirt_examples).
+[BitBucket](https://bitbucket.org/ldo17/seaskirt_examples).
 
 The main design philosophy of Seaskirt is to cover the basic
 protocols. When I compare other bindings (see below), I see they put a
@@ -332,4 +332,4 @@ they work with `asyncio` and offer TLS encryption.
 | [`asyncari`](https://github.com/M-o-a-T/asyncari/) | no | no | yes | via [`anyio`](https://github.com/agronholm/anyio) | no |
 
 Lawrence D'Oliveiro <ldo@geek-central.gen.nz>
-2023 June 12
+2023 September 27
